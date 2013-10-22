@@ -1,0 +1,7 @@
+{{extend "layout.html"}}
+<div class='map_home'>
+  <a href='{{=URL(f="map_viewing_client")}}' style='font-weight:bold;padding-left:8px;' class='gis_fullscreen_map-btn'>
+   {{=T("View Fullscreen Map")}}
+  </a>
+  {{=XML(map)}}
+</div>
