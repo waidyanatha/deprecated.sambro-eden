@@ -1,0 +1,20 @@
+{{try:}}{{=H2(title)}}{{except:}}{{pass}}
+<div id='rheader'>
+{{try:}}{{=XML(rheader)}}
+</div>
+<div id='component'>
+{{except:}}
+</div>
+<div>
+{{pass}}
+<div id='map'></div>
+<div id='list-btn-add'>
+{{try:}}{{=add_btn}}{{except:}}{{pass}}
+</div>
+<div id='table-container'>
+{{try:}}{{=items}}
+</div>
+{{except:}}{{pass}}
+</div>
+{{if s3.rfooter:}}<div id='rfooter'>{{=XML(s3.rfooter)}}</div>{{pass}}
+{{include "dataTables.html"}}
