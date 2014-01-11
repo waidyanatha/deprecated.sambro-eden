@@ -178,3 +178,28 @@ textarea:focus {
     font-size: large;
     overflow: auto;
 }
+#cap_container{
+    overflow: hidden;
+}
+#public_alerts{
+    float: left;
+    border:solid 3px #000;
+    min-width: 200px;
+    width: 20%;
+    height: 400px;
+}
+#subscribe_cap{
+    float: right;
+    border:solid 3px #000;
+    min-width: 200px;
+    width: 20%;
+    height: 400px;    
+}
+#cap_map{
+    float: left;
+    left: 250px;
+    border:solid 3px #f00;
+    min-width:400px;
+    width: 58%;
+    height: 400px;
+}

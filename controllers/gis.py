@@ -54,6 +54,14 @@ def index():
             script = "/%s/static/scripts/S3/s3.gis.fullscreen.min.js" % appname
         s3.scripts.append(script)
 
+    help = T("To Print or Share the Map you will have to take a screenshot. If you need help taking a screen shot, have a look at these instructions for %(windows)s or %(mac)s") \
+        % dict(windows="<a href='http://www.wikihow.com/Take-a-Screenshot-in-Microsoft-Windows' target='_blank'>Windows</a>",
+               mac="<a href='http://www.wikihow.com/Take-a-Screenshot-in-Mac-OS-X' target='_blank'>Mac</a>")
+    script = '''i18n.gis_print_help="%s"''' % help
+    s3.js_global.append(script)
+    script = "/%s/static/scripts/S3/s3.gis.print_help.js" % appname
+    s3.scripts.append(script)
+
     # Include an embedded Map on the index page
     map = define_map(height=height,
                      width=width,
@@ -430,9 +438,8 @@ def ldata():
     """
 
     args = request.args
-    args_len = len(args)
 
-    if args_len == 0:
+    if len(args) == 0:
         raise HTTP(400)
 
     id = args[0]
@@ -520,6 +527,56 @@ def ldata():
                                                     )
 
     script = '''n=%s\n''' % json.dumps(location_dict)
+    response.headers["Content-Type"] = "application/json"
+    return script
+
+# -----------------------------------------------------------------------------
+def hdata():
+    """
+        Return JSON of hierarchy labels suitable for use by S3LocationSelectorWidget2
+        '/eden/gis/hdata/' + l0_id
+
+        n = {l0_id : {1 : l1_name,
+                      2 : l2_name,
+                      etc,
+                      }}
+    """
+
+    args = request.args
+
+    if len(args) == 0:
+        raise HTTP(400)
+
+    id = args[0]
+
+    # @ToDo: Translate options using gis_hierarchy_name?
+    #translate = settings.get_L10n_translate_gis_location()
+    #if translate:
+    #    language = current.session.s3.language
+    #    if language == current.deployment_settings.get_L10n_default_language():
+    #        translate = False
+
+    table = s3db.gis_hierarchy
+    query = (table.deleted == False) & \
+            (table.location_id == id)
+    fields = [table.L1,
+              table.L2,
+              table.L3,
+              table.L4,
+              table.L5,
+              ]
+    row = db(query).select(*fields,
+                           limitby=(0, 1)
+                           ).first()
+    if not row:
+        return ""
+
+    hdict = {}
+    for l in ["L1", "L2", "L3", "L4", "L5"]:
+        if row[l]:
+            hdict[int(l[1:])] = row[l]
+
+    script = '''n=%s\n''' % json.dumps(hdict)
     response.headers["Content-Type"] = "application/json"
     return script
 
@@ -734,7 +791,16 @@ def config():
 
     # Pre-process
     def prep(r):
-        if r.interactive:
+        if r.representation == "url":
+            # Save from Map
+            if r.method == "create" and \
+                 auth.is_logged_in() and \
+                 not auth.s3_has_role(MAP_ADMIN):
+                pe_id = auth.user.pe_id
+                r.table.pe_id.default = pe_id
+                r.table.pe_type.default = 1
+
+        elif r.interactive or r.representation == "aadata":
             if not r.component:
                 s3db.gis_config_form_setup()
                 if auth.s3_has_role(MAP_ADMIN):
@@ -751,24 +817,41 @@ def config():
                                                   },
                                    )
                 else:
+                    s3.crud_strings.gis_config.title_list = T("Saved Maps")
+                    # Hide Exports
+                    settings.ui.export_formats = []
                     # Filter Region & Default Configs
                     table = r.table
                     s3.filter = (table.region_location_id == None) & \
                                 (table.uuid != "SITE_DEFAULT")
                     list_fields = ["name",
+                                   "pe_id",
+                                   "pe_default",
                                    ]
+                    CREATED_BY = T("Created By")
+                    field = table.pe_id
+                    field.label = CREATED_BY
+                    field.represent = s3db.pr_PersonEntityRepresent(show_label = False,
+                                                                    show_type = False,
+                                                                    show_link = True,
+                                                                    )
                     if auth.is_logged_in():
-                        if "~.pe_id" in request.get_vars:
-                            s3.crud_strings.gis_config.title_list = T("My Maps")
-                            list_fields.append("pe_default")
-                        else:
-                            s3.crud_strings.gis_config.title_list = T("Saved Maps")
-                            list_fields.append("pe_id")
-                            field = table.pe_id
-                            field.label = T("Person")
-                            field.represent = s3db.pr_PersonEntityRepresent(show_label=False, show_type=False)
+                        settings.search.filter_manager = False
+                        from s3.s3filter import S3OptionsFilter
+                        filter_widgets = [
+                            S3OptionsFilter("pe_id",
+                                            label = "",
+                                            options = {"*": T("All"),
+                                                       auth.user.pe_id: T("My Maps"),
+                                                       },
+                                            multiple = False,
+                                            )
+                            ]
+                        s3db.configure("gis_config",
+                                       filter_clear = False,
+                                       filter_widgets = filter_widgets,
+                                       )
                         # For Create forms
-                        field = table.pe_id
                         field.default = auth.user.pe_id
                         field.readable = field.writable = False
                         fields = ["name",
@@ -861,15 +944,6 @@ def config():
                                                          not_filter_opts=[row.layer_id for row in rows]
                                                          )
 
-        elif r.representation == "url":
-            # Save from Map
-            if r.method == "create" and \
-                 auth.is_logged_in() and \
-                 not auth.s3_has_role(MAP_ADMIN):
-                pe_id = auth.user.pe_id
-                r.table.pe_id.default = pe_id
-                r.table.pe_type.default = 1
-
         return True
     s3.prep = prep
 
@@ -952,7 +1026,9 @@ def config():
         return output
     s3.postp = postp
 
-    output = s3_rest_controller(rheader=s3db.gis_rheader)
+    output = s3_rest_controller(rheader=s3db.gis_rheader,
+                                hide_filter = False,
+                                )
     return output
 
 # -----------------------------------------------------------------------------

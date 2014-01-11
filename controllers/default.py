@@ -104,18 +104,7 @@ def index():
 
     item = ""
     has_module = settings.has_module
-    if has_module("cms"):
-        table = s3db.cms_post
-        ltable = s3db.cms_post_module
-        query = (ltable.module == module) & \
-                (ltable.post_id == table.id) & \
-                (table.deleted != True)
-        item = db(query).select(table.body,
-                                limitby=(0, 1)).first()
-        if item:
-            item = DIV(XML(item.body))
-        else:
-            item = ""
+    
 
     if has_module("cr"):
         table = s3db.cr_shelter
@@ -272,13 +261,10 @@ def index():
 
         if self_registration:
             # Provide a Registration box on front page
-            register_form = auth.register()
+            register_form = auth.s3_registration_form()
             register_div = DIV(H3(T("Register")),
                                P(XML(T("If you would like to help, then please %(sign_up_now)s") % \
                                         dict(sign_up_now=B(T("sign-up now"))))))
-
-             # Add client-side validation
-            s3base.s3_register_validation()
 
             if request.env.request_method == "POST":
                 post_script = \
@@ -341,24 +327,24 @@ google.load('feeds','1')
 google.setOnLoadCallback(LoadDynamicFeedControl)'''))
         s3.js_global.append(feed_control)
 
-    output =  dict(title = title,
-                item = item,
-                sit_dec_res_box = sit_dec_res_box,
-                facility_box = facility_box,
-                manage_facility_box = manage_facility_box,
-                org_box = org_box,
-                r = None, # Required for dataTable to work
-                datatable_ajax_source = datatable_ajax_source,
-                self_registration=self_registration,
-                registered=registered,
-                login_form=login_form,
-                login_div=login_div,
-                register_form=register_form,
-                register_div=register_div
-                )
+    output = dict(title = title,
+                  item = item,
+                  sit_dec_res_box = sit_dec_res_box,
+                  facility_box = facility_box,
+                  manage_facility_box = manage_facility_box,
+                  org_box = org_box,
+                  r = None, # Required for dataTable to work
+                  datatable_ajax_source = datatable_ajax_source,
+                  self_registration=self_registration,
+                  registered=registered,
+                  login_form=login_form,
+                  login_div=login_div,
+                  register_form=register_form,
+                  register_div=register_div
+                  )
 
-    output = s3_guided_tour(output)
-
+    output = s3_guided_tour(output) 
+    
     return output
 # -----------------------------------------------------------------------------
 def organisation():
@@ -368,25 +354,25 @@ def organisation():
 
     request = current.request
     get_vars = request.get_vars
+    representation = request.extension
 
     resource = current.s3db.resource("org_organisation")
     totalrows = resource.count()
-    if "iDisplayLength" in get_vars:
-        display_length = int(request.get_vars["iDisplayLength"])
-    else:
-        display_length = 10
+    display_start = int(get_vars.iDisplayStart) if get_vars.iDisplayStart else 0
+    display_length = int(get_vars.iDisplayLength) if get_vars.iDisplayLength else 10
     limit = 4 * display_length
 
     list_fields = ["id", "name"]
-    filter, orderby, left = resource.datatable_filter(list_fields,
-                                                        get_vars)
-    resource.add_filter(filter)
+    default_orderby = orderby = "org_organisation.name asc"
+    if representation == "aadata":
+        query, orderby, left = resource.datatable_filter(list_fields, get_vars)
+        if orderby is None:
+            orderby = default_orderby
 
     data = resource.select(list_fields,
-                           start=0,
+                           start=display_start,
                            limit=limit,
                            orderby=orderby,
-                           left=left,
                            count=True,
                            represent=True)
     filteredrows = data["numrows"]
@@ -397,7 +383,7 @@ def organisation():
     dt.defaultActionButtons(resource)
     current.response.s3.no_formats = True
 
-    if request.extension == "html":
+    if representation == "html":
         items = dt.html(totalrows,
                         totalrows,
                         "org_dt",
@@ -409,7 +395,7 @@ def organisation():
                                         ),
                         dt_pagination="true",
                         )
-    elif request.extension.lower() == "aadata":
+    elif representation == "aadata":
         if "sEcho" in request.vars:
             echo = int(request.vars.sEcho)
         else:
@@ -520,10 +506,7 @@ def user():
             session.error = T("Registration not permitted")
             redirect(URL(f="index"))
 
-        form = auth.register()
-        register_form = form
-        # Add client-side validation
-        s3base.s3_register_validation()
+        form = register_form = auth.s3_registration_form()
     elif arg == "change_password":
         title = response.title = T("Change Password")
         form = auth()
@@ -539,6 +522,9 @@ def user():
     elif arg == "profile":
         title = response.title = T("User Profile")
         form = auth.profile()
+    elif arg == "options.s3json":
+        # Used when adding organisations from registration form
+        return s3_rest_controller(prefix="auth", resourcename="user")
     else:
         # logout
         title = ""
@@ -592,7 +578,7 @@ def person():
     # If it is an json request, leave the arguments unmodified.
     if not request.args or (request.args[0] != user_person_id
                             and request.args[-1] != "options.s3json"):
-        request.args = [str(user_person_id)]
+        request.args = [user_person_id]
 
     set_method = s3db.set_method
 
@@ -612,7 +598,7 @@ def person():
 
         next = URL(c = "default",
                    f = "person",
-                   args = [str(user_person_id), "user"])
+                   args = [user_person_id, "user"])
         onaccept = lambda form: auth.s3_approve_user(form.vars),
         form = auth.profile(next = next,
                             onaccept = onaccept)
@@ -687,32 +673,44 @@ def person():
                                 raise HTTP(404)
 
                 elif r.component_name == "config":
-                    _config = s3db.gis_config
+                    ctable = s3db.gis_config
                     s3db.gis_config_form_setup()
-                    # Name will be generated from person's name.
-                    #_config.name.readable = _config.name.writable = False
-                    # Hide Location
-                    #_config.region_location_id.readable = _config.region_location_id.writable = False
 
-                    # OpenStreetMap config
-                    s3db.add_component("auth_user_options",
-                                       gis_config=dict(joinby="pe_id",
-                                                       pkey="pe_id",
-                                                       multiple=False)
-                                       )
-                    fields = ["default_location_id",
+                    # Create forms use this
+                    # (update forms are in gis/config())
+                    fields = ["name",
+                              "pe_default",
+                              "default_location_id",
                               "zoom",
                               "lat",
                               "lon",
-                              "projection_id",
-                              "symbology_id",
-                              "wmsbrowser_url",
-                              "wmsbrowser_name",
-                              "user_options.osm_oauth_consumer_key",
-                              "user_options.osm_oauth_consumer_secret",
+                              #"projection_id",
+                              #"symbology_id",
+                              #"wmsbrowser_url",
+                              #"wmsbrowser_name",
                               ]
+                    osm_table = s3db.gis_layer_openstreetmap
+                    openstreetmap = db(osm_table.deleted == False).select(osm_table.id,
+                                                                          limitby=(0, 1))
+                    if openstreetmap:
+                        # OpenStreetMap config
+                        s3db.add_component("auth_user_options",
+                                           gis_config=dict(joinby="pe_id",
+                                                           pkey="pe_id",
+                                                           multiple=False)
+                                           )
+                        fields += ["user_options.osm_oauth_consumer_key",
+                                   "user_options.osm_oauth_consumer_secret",
+                                   ]
                     crud_form = s3base.S3SQLCustomForm(*fields)
-                    s3db.configure("gis_config", crud_form=crud_form)
+                    list_fields = ["name",
+                                   "pe_default",
+                                   ]
+                    s3db.configure("gis_config",
+                                   crud_form=crud_form,
+                                   insertable=False,
+                                   list_fields = list_fields,
+                                   )
             else:
                 table = r.table
                 table.pe_label.readable = False
@@ -740,6 +738,16 @@ def person():
                 # Set the minimum end_date to the same as the start_date
                 s3.jquery_ready.append(
 '''S3.start_end_date('hrm_experience_start_date','hrm_experience_end_date')''')
+            elif r.component_name == "config":
+                update_url = URL(c="gis", f="config",
+                                 args="[id]")
+                s3_action_buttons(r, update_url=update_url)
+                s3.actions.append(
+                    dict(url=URL(c="gis", f="index",
+                                 vars={"config":"[id]"}),
+                         label=str(T("Show")),
+                         _class="action-btn")
+                )
             elif r.component_name == "saved_search" and r.method in (None, "search"):
                 s3_action_buttons(r)
                 s3.actions.append(
@@ -823,7 +831,7 @@ def person():
             experience_tab,
             teams_tab,
             #(T("Assets"), "asset"),
-            (T("Map Options"), "config"),
+            (T("My Maps"), "config"),
             searches_tab,
             ]
     
@@ -1074,6 +1082,23 @@ def tos():
     return dict()
 
 # -----------------------------------------------------------------------------
+def video():
+    """ Custom View """
+    if settings.get_template() != "default":
+        # Try a Custom View
+        view = os.path.join(request.folder, "private", "templates",
+                            settings.get_template(), "views", "video.html")
+        if os.path.exists(view):
+            try:
+                # Pass view as file not str to work in compiled mode
+                response.view = open(view, "rb")
+            except IOError:
+                from gluon.http import HTTP
+                raise HTTP("404", "Unable to open Custom View: %s" % view)
+
+    return dict()
+
+# -----------------------------------------------------------------------------
 def contact():
     """
         Give the user options to contact the site admins.
@@ -1148,5 +1173,17 @@ def load_all_models():
 
     s3db.load_all_models()
     return "ok"
+
+# -----------------------------------------------------------------------------
+def audit():
+    """
+        RESTful CRUD Controller for Audit Logs
+        - used e.g. for Site Activity
+    """
+
+    return s3_rest_controller("s3", "audit")
+#------------------------------------------------------------------------------
+
+
 
 # END =========================================================================

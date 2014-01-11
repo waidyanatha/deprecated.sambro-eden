@@ -14,10 +14,9 @@ from gluon import current
 from gluon.html import *
 from gluon.storage import Storage
 
-from s3.s3crud import S3CRUD
 from s3.s3filter import S3DateFilter, S3LocationFilter, S3OptionsFilter, S3TextFilter, S3FilterForm
-from s3.s3resource import S3FieldSelector
-from s3.s3utils import s3_avatar_represent, S3CustomController
+#from s3.s3utils import s3_avatar_represent, S3CustomController
+from s3.s3utils import S3CustomController
 
 THEME = "DRMP"
 
@@ -28,7 +27,7 @@ class index(S3CustomController):
     def __call__(self):
 
         response = current.response
-        
+
         output = {}
         #output["title"] = response.title = current.deployment_settings.get_system_name()
 
@@ -37,6 +36,7 @@ class index(S3CustomController):
         s3.jquery_ready.append('''$('#myCarousel').carousel()''')
 
         # Latest 4 Events and Alerts
+        from s3.s3resource import S3FieldSelector
         s3db = current.s3db
         layout = s3.render_posts
         listid = "news_datalist"
@@ -156,21 +156,18 @@ def _newsfeed():
                                       label=T("Filter by Type"),
                                       represent="%(name)s",
                                       widget="multiselect",
-                                      cols=3,
                                       hidden=True,
                                       ),
                       S3LocationFilter("location_id",
                                        label=T("Filter by Location"),
                                        levels=["L1", "L2", "L3"],
                                        widget="multiselect",
-                                       cols=3,
                                        hidden=True,
                                        ),
                       S3OptionsFilter("created_by$organisation_id",
                                       label=T("Filter by Organization"),
                                       represent="%(name)s",
                                       widget="multiselect",
-                                      cols=3,
                                       hidden=True,
                                       ),
                       S3DateFilter("created_on",
@@ -233,7 +230,8 @@ def _newsfeed():
                                                         args="datalist_dl_post"),
                                      filter_ajax_url = URL(f="index",
                                                            args="datalist_dl_filter",
-                                                           vars={}))
+                                                           vars={}),
+                                     )
 
     if ajax == "list":
         # Don't override view if this is an Ajax-deletion request
@@ -251,15 +249,9 @@ def _newsfeed():
             from gluon.http import HTTP
             raise HTTP("404", "Unable to open Custom View: %s" % view)
 
-        scripts = []
-        sappend = scripts.append
-        # Style the Search TextFilter widget
-        sappend('''$('#post-cms_post_body-text-filter__row').addClass('input-append').append('<span class="add-on"><i class="icon-search"></i></span>')''')
-        # Button to toggle Advanced Form
-        sappend('''$('#list-filter').append('<a class="accordion-toggle"><i class="icon-reorder"></i> %s</a>')''' % T("Advanced Search"))
-        sappend('''$('.accordion-toggle').click(function(){$('.advanced').toggle()})''')
-        s3.jquery_ready.append('''\n'''.join(scripts))
-        
+        s3.js_global.append('''i18n.adv_search="%s"''' % T("Advanced Search"))
+        s3.scripts.append("/%s/static/themes/%s/js/newsfeed.js" % (request.application, THEME))
+
         # Latest 5 Disasters
         resource = s3db.resource("event_event")
         layout = render_events
@@ -290,6 +282,7 @@ def latest_records(resource, layout, listid, limit, list_fields, orderby):
                                                layout=layout)
     if numrows == 0:
         # Empty table or just no match?
+        from s3.s3crud import S3CRUD
         table = resource.table
         if "deleted" in table:
             available_records = current.db(table.deleted != True)
@@ -425,6 +418,7 @@ def render_events(listid, resource, rfields, record, **attr):
 def render_cms_events(listid, resource, rfields, record, **attr):
     """
         Custom dataList item renderer for 'Events' on the Home page
+        - unused
 
         @param listid: the HTML ID for this list
         @param resource: the S3Resource to render
@@ -637,13 +631,16 @@ class subscriptions(S3CustomController):
         filters = [S3OptionsFilter("series_id",
                                    label=T("Subscribe to"),
                                    represent="%(name)s",
-                                   widget="groupedopts",
+                                   options=self._options("series_id"),
+                                   #widget="groupedopts",
+                                   widget="multiselect",
                                    cols=2,
                                    resource="cms_post",
                                    _name="type-filter"),
                    S3LocationFilter("location_id",
                                     label=T("Location(s)"),
                                     levels=["L1"],
+                                    options=self._options("location_id"),
                                     widget="multiselect",
                                     cols=3,
                                     resource="cms_post",
@@ -667,6 +664,34 @@ class subscriptions(S3CustomController):
         
         return dict(title=title, form=form)
         
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def _options(fieldname):
+        """
+            Lookup the full set of options for a Filter Widget
+            - for Subscriptions we don't want to see just the options available in current data
+        """
+
+        db = current.db
+        if fieldname == "series_id":
+            table = current.s3db.cms_series
+            query = (table.deleted == False)
+            rows = db(query).select(table.id,
+                                    table.name)
+            options = {}
+            for row in rows:
+                options[row.id] = row.name
+
+        elif fieldname == "location_id":
+            table = current.s3db.gis_location
+            query = (table.deleted == False) & \
+                    (table.level == "L1")
+            # IDs converted inside widget's _options() function
+            rows = db(query).select(table.id)
+            options = [row.id for row in rows]
+
+        return options
+
     # -------------------------------------------------------------------------
     def _manage_subscriptions(self, resources, filters):
         """
@@ -782,20 +807,9 @@ class subscriptions(S3CustomController):
         form.append(fieldset)
 
         # Script (to extract filters on submit and toggle options visibility)
-        script = """
-$('#notification-options').click(function() {
-  $(this).siblings().toggle();
-  $(this).children().toggle();
-});
-$('#notification-options').siblings().toggle();
-$('#notification-options').children().toggle();
-$('#subscription-form').submit(function() {
-  $('input[name="subscription-filters"]')
-  .val(JSON.stringify(S3.search.getCurrentFilters($(this))));
-});
-"""
+        script = URL(c="static", f="themes", args=[THEME, "js", "subscriptions.js"])
         response = current.response
-        response.s3.jquery_ready.append(script)
+        response.s3.scripts.append(script)
 
         # Accept form
         if form.accepts(current.request.post_vars,

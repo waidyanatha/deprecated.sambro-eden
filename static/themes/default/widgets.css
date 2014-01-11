@@ -101,7 +101,8 @@ label.over {
     color: #ccc;
     font-style: italic;
     position: absolute;
-    top: 5px;
+    /* Wrong on Save Map */
+    /*top: 5px;*/
     left: 5px;
 }
 
@@ -173,7 +174,7 @@ table.embeddedComponent tr.label-row td {
 /* Summary Page */
 #summary-tabs {
     /* Hide while loading */
-    display: none;
+    visibility: hidden;
 }
 
 #summary-filter-form {
@@ -671,11 +672,11 @@ body.popup {
 }
 
 .input_throbber {
-    background-size: 50%;
+    background-size: 60% !important;
     height: 24px;
     width: 24px;
     display: inline-block;
-    margin: 0 0 -12px -24px;
+    margin: 0 0 -11px -24px;
 }
 
 /* Resource Header */
@@ -1327,6 +1328,7 @@ input#sub_defaulttime_defaulttime_hours_edit_none {
 }
 .fm-load,
 .fm-save,
+.fm-delete,
 .fm-create,
 .fm-accept,
 .fm-cancel {
@@ -1336,6 +1338,7 @@ input#sub_defaulttime_defaulttime_hours_edit_none {
 
 div.fm-load,
 div.fm-save,
+div.fm-delete,
 div.fm-create,
 div.fm-accept,
 div.fm-cancel {
@@ -1348,6 +1351,9 @@ div.fm-load {
 }
 div.fm-save {
     background: url(../../img/filter/save.png) no-repeat;
+}
+div.fm-delete {
+    background: url(../../img/filter/delete.png) no-repeat;
 }
 div.fm-create {
     background: url(../../img/filter/create.png) no-repeat;
