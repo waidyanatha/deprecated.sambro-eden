@@ -1,0 +1,36 @@
+{{extend "layout.html"}}
+<div class="row">
+  <center><h2>SAMBRO - {{=settings.get_system_name()}}</h2></center>
+  <div class="row">
+   <div class="span3">
+    <div class="public_alearts">
+     <h4><center>PUBLIC ALERTS</center></h4>
+
+     <p>
+      <ul >
+        <li><a tabindex="-1" href="#">Action1</a></li>
+        <li><a tabindex="-1" href="#">Action2</a></li>
+        <li><a tabindex="-1" href="#">Action3</a></li>
+        <li><a tabindex="-1" href="#">Action4</a></li>
+      </ul>
+     </p>
+    </div>
+   </div>
+   <div class="span7">
+    <div class="fr_map">
+     {{=XML(map)}}
+    </div>
+   </div>
+ <div class="span2"> 
+  <div class="community-data ">
+   <h4><center>SUBSCRIBE</center></h4>
+   <p>To subscribe to National alearts through SMS, Email, RSS feeds click here.</p>
+   <ul>
+      <li><a href="#"> <i class="icon-hand-right"></i> SMS ..</a></li>
+      <li><a href="#"><i class="icon-hand-right"></i> Email ..</a></li>
+      <li><a href="#"><i class="icon-hand-right"></i> RSS ..</a></li>
+   </ul>
+  </div>
+ </div>
+ </div>
+</div>

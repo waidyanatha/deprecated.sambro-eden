@@ -621,6 +621,12 @@ class GIS(object):
                                 if wkt:
                                     from shapely.geometry import point
                                     from shapely.wkt import loads as wkt_loads
+                                    try:
+                                        # Enable C-based speedups available from 1.2.10+
+                                        from shapely import speedups
+                                        speedups.enable()
+                                    except:
+                                        s3_debug("S3GIS", "Upgrade Shapely for Performance enhancements")
                                     test = point.Point(lon, lat)
                                     shape = wkt_loads(wkt)
                                     ok = test.intersects(shape)
@@ -2373,7 +2379,7 @@ class GIS(object):
         id = resource._ids[0]
         tablename = "gis_layer_shapefile_%s" % id
         table = db[tablename]
-        query = resource.rfilter.query
+        query = resource.get_query()
         fields = []
         fappend = fields.append
         for f in table.fields:
@@ -3965,51 +3971,59 @@ class GIS(object):
             Called onaccept for locations (async, where-possible)
         """
 
+        db = current.db
+        try:
+            table = db.gis_location
+        except:
+            table = current.s3db.gis_location
+        spatial = current.deployment_settings.get_gis_spatialdb()
+        wkt_centroid = GIS.wkt_centroid
+
+        def bounds_centroid_wkt(feature):
+            form = Storage()
+            form.vars = feature
+            form.errors = Storage()
+            wkt_centroid(form)
+            vars = form.vars
+            if "lat_max" in vars:
+                wkt = vars.wkt
+                _vars = dict(gis_feature_type = vars.gis_feature_type,
+                             lat = vars.lat,
+                             lon = vars.lon,
+                             wkt = wkt,
+                             lat_max = vars.lat_max,
+                             lat_min = vars.lat_min,
+                             lon_min = vars.lon_min,
+                             lon_max = vars.lon_max)
+                if wkt:
+                    if not wkt.startswith("POI"):
+                        # Polygons aren't inherited
+                        _vars.update(inherited = False)
+                    if spatial:
+                        _vars.update(the_geom = wkt)
+                db(table.id == feature.id).update(**_vars)
+
         if not feature:
             # Do the whole database
             # Do in chunks to save memory and also do in correct order
-            db = current.db
-            try:
-                table = db.gis_location
-            except:
-                table = current.s3db.gis_location
             fields = [table.id, table.name, table.gis_feature_type,
                       table.L0, table.L1, table.L2, table.L3, table.L4,
                       table.lat, table.lon, table.wkt, table.inherited,
                       # Handle Countries which start with Bounds set, yet are Points
                       table.lat_min, table.lon_min, table.lat_max, table.lon_max,
                       table.path, table.parent]
-            spatial = current.deployment_settings.get_gis_spatialdb()
             update_location_tree = GIS.update_location_tree
-            wkt_centroid = GIS.wkt_centroid
             for level in ["L0", "L1", "L2", "L3", "L4", "L5", None]:
                 features = db(table.level == level).select(*fields)
                 for feature in features:
                     feature["level"] = level
+                    wkt = feature["wkt"]
+                    if wkt and not wkt.startswith("POI"):
+                        # Polygons aren't inherited
+                        feature["inherited"] = False
                     update_location_tree(feature)
                     # Also do the Bounds/Centroid/WKT
-                    form = Storage()
-                    form.vars = feature
-                    form.errors = Storage()
-                    wkt_centroid(form)
-                    vars = form.vars
-                    if "lat_max" in vars:
-                        wkt = vars.wkt
-                        _vars = dict(gis_feature_type = vars.gis_feature_type,
-                                     lat = vars.lat,
-                                     lon = vars.lon,
-                                     wkt = wkt,
-                                     lat_max = vars.lat_max,
-                                     lat_min = vars.lat_min,
-                                     lon_min = vars.lon_min,
-                                     lon_max = vars.lon_max)
-                        if wkt:
-                            if not wkt.startswith("POI"):
-                                # Polygons aren't inherited
-                                _vars.update(inherited = False)
-                            if spatial:
-                                _vars.update(the_geom = wkt)
-                        db(table.id == feature.id).update(**_vars)
+                    bounds_centroid_wkt(feature)
             return
 
         # Single Feature
@@ -4019,11 +4033,6 @@ class GIS(object):
             raise ValueError
 
         # L0
-        db = current.db
-        try:
-            table = db.gis_location
-        except:
-            table = current.s3db.gis_location
         name = feature.get("name", False)
         level = feature.get("level", False)
         path = feature.get("path", False)
@@ -4102,21 +4111,36 @@ class GIS(object):
                     # No action required
                     return path
                 elif inherited or lat is None or lon is None:
-                    db(table.id == id).update(inherited=True,
-                                              lat=L0_lat,
-                                              lon=L0_lon)
+                    vars = dict(inherited=True,
+                                lat=L0_lat,
+                                lon=L0_lon,
+                                )
+                    db(table.id == id).update(**vars)
+                    # Also do the Bounds/Centroid/WKT
+                    vars.update(id=id,
+                                gis_feature_type="1",
+                                )
+                    feature.update(**vars)
+                    bounds_centroid_wkt(feature)
             elif inherited and lat == L0_lat and lon == L0_lon:
                 db(table.id == id).update(path=_path,
                                           L0=L0_name,
                                           L1=name)
                 return _path
             elif inherited or lat is None or lon is None:
-                db(table.id == id).update(path=_path,
-                                          L0=L0_name,
-                                          L1=name,
-                                          inherited=True,
-                                          lat=L0_lat,
-                                          lon=L0_lon)
+                vars = dict(path=_path,
+                            L0=L0_name,
+                            L1=name,
+                            inherited=True,
+                            lat=L0_lat,
+                            lon=L0_lon)
+                db(table.id == id).update(**vars)
+                # Also do the Bounds/Centroid/WKT
+                vars.update(id=id,
+                            gis_feature_type="1",
+                            )
+                feature.update(**vars)
+                bounds_centroid_wkt(feature)
             else:
                 db(table.id == id).update(path=_path,
                                           inherited=False,
@@ -4203,9 +4227,17 @@ class GIS(object):
                     # No action required
                     return path
                 elif inherited or lat is None or lon is None:
-                    db(table.id == id).update(inherited=True,
-                                              lat=Lx_lat,
-                                              lon=Lx_lon)
+                    vars = dict(inherited=True,
+                                lat=Lx_lat,
+                                lon=Lx_lon,
+                                )
+                    db(table.id == id).update(**vars)
+                    # Also do the Bounds/Centroid/WKT
+                    vars.update(id=id,
+                                gis_feature_type="1",
+                                )
+                    feature.update(**vars)
+                    bounds_centroid_wkt(feature)
             elif inherited and lat == Lx_lat and lon == Lx_lon:
                 db(table.id == id).update(path=_path,
                                           L0=L0_name,
@@ -4214,13 +4246,20 @@ class GIS(object):
                                           )
                 return _path
             elif inherited or lat is None or lon is None:
-                db(table.id == id).update(path=_path,
-                                          L0=L0_name,
-                                          L1=L1_name,
-                                          L2=name,
-                                          inherited=True,
-                                          lat=Lx_lat,
-                                          lon=Lx_lon)
+                vars = dict(path=_path,
+                            L0=L0_name,
+                            L1=L1_name,
+                            L2=name,
+                            inherited=True,
+                            lat=Lx_lat,
+                            lon=Lx_lon)
+                db(table.id == id).update(**vars)
+                # Also do the Bounds/Centroid/WKT
+                vars.update(id=id,
+                            gis_feature_type="1",
+                            )
+                feature.update(**vars)
+                bounds_centroid_wkt(feature)
             else:
                 db(table.id == id).update(path=_path,
                                           inherited=False,
@@ -4342,9 +4381,16 @@ class GIS(object):
                     # No action required
                     return path
                 elif inherited or lat is None or lon is None:
-                    db(table.id == id).update(inherited=True,
-                                              lat=Lx_lat,
-                                              lon=Lx_lon)
+                    vars = dict(inherited=True,
+                                lat=Lx_lat,
+                                lon=Lx_lon,
+                                )
+                    db(table.id == id).update(**vars)
+                    # Also do the Bounds/Centroid/WKT
+                    vars.update(id=id,
+                                gis_feature_type="1",
+                                )
+                    bounds_centroid_wkt(feature)
             elif inherited and lat == Lx_lat and lon == Lx_lon:
                 db(table.id == id).update(path=_path,
                                           L0=L0_name,
@@ -4354,14 +4400,21 @@ class GIS(object):
                                           )
                 return _path
             elif inherited or lat is None or lon is None:
-                db(table.id == id).update(path=_path,
-                                          L0=L0_name,
-                                          L1=L1_name,
-                                          L2=L2_name,
-                                          L3=name,
-                                          inherited=True,
-                                          lat=Lx_lat,
-                                          lon=Lx_lon)
+                vars = dict(path=_path,
+                            L0=L0_name,
+                            L1=L1_name,
+                            L2=L2_name,
+                            L3=name,
+                            inherited=True,
+                            lat=Lx_lat,
+                            lon=Lx_lon)
+                db(table.id == id).update(**vars)
+                # Also do the Bounds/Centroid/WKT
+                vars.update(id=id,
+                            gis_feature_type="1",
+                            )
+                feature.update(**vars)
+                bounds_centroid_wkt(feature)
             else:
                 db(table.id == id).update(path=_path,
                                           inherited=False,
@@ -4516,9 +4569,17 @@ class GIS(object):
                     # No action required
                     return path
                 elif inherited or lat is None or lon is None:
-                    db(table.id == id).update(inherited=True,
-                                              lat=Lx_lat,
-                                              lon=Lx_lon)
+                    vars = dict(inherited=True,
+                                lat=Lx_lat,
+                                lon=Lx_lon,
+                                )
+                    db(table.id == id).update(**vars)
+                    # Also do the Bounds/Centroid/WKT
+                    vars.update(id=id,
+                                gis_feature_type="1",
+                                )
+                    feature.update(**vars)
+                    bounds_centroid_wkt(feature)
             elif inherited and lat == Lx_lat and lon == Lx_lon:
                 db(table.id == id).update(path=_path,
                                           L0=L0_name,
@@ -4529,15 +4590,22 @@ class GIS(object):
                                           )
                 return _path
             elif inherited or lat is None or lon is None:
-                db(table.id == id).update(path=_path,
-                                          L0=L0_name,
-                                          L1=L1_name,
-                                          L2=L2_name,
-                                          L3=L3_name,
-                                          L4=name,
-                                          inherited=True,
-                                          lat=Lx_lat,
-                                          lon=Lx_lon)
+                vars = dict(path=_path,
+                            L0=L0_name,
+                            L1=L1_name,
+                            L2=L2_name,
+                            L3=L3_name,
+                            L4=name,
+                            inherited=True,
+                            lat=Lx_lat,
+                            lon=Lx_lon)
+                db(table.id == id).update(**vars)
+                # Also do the Bounds/Centroid/WKT
+                vars.update(id=id,
+                            gis_feature_type="1",
+                            )
+                feature.update(**vars)
+                bounds_centroid_wkt(feature)
             else:
                 db(table.id == id).update(path=_path,
                                           inherited=False,
@@ -4727,9 +4795,17 @@ class GIS(object):
                     # No action required
                     return path
                 elif inherited or lat is None or lon is None:
-                    db(table.id == id).update(inherited=True,
-                                              lat=Lx_lat,
-                                              lon=Lx_lon)
+                    vars = dict(inherited=True,
+                                lat=Lx_lat,
+                                lon=Lx_lon,
+                                )
+                    db(table.id == id).update(**vars)
+                    # Also do the Bounds/Centroid/WKT
+                    vars.update(id=id,
+                                gis_feature_type="1",
+                                )
+                    feature.update(**vars)
+                    bounds_centroid_wkt(feature)
             elif inherited and lat == Lx_lat and lon == Lx_lon:
                 db(table.id == id).update(path=_path,
                                           L0=L0_name,
@@ -4741,16 +4817,23 @@ class GIS(object):
                                           )
                 return _path
             elif inherited or lat is None or lon is None:
-                db(table.id == id).update(path=_path,
-                                          L0=L0_name,
-                                          L1=L1_name,
-                                          L2=L2_name,
-                                          L3=L3_name,
-                                          L4=L4_name,
-                                          L5=name,
-                                          inherited=True,
-                                          lat=Lx_lat,
-                                          lon=Lx_lon)
+                vars = dict(path=_path,
+                            L0=L0_name,
+                            L1=L1_name,
+                            L2=L2_name,
+                            L3=L3_name,
+                            L4=L4_name,
+                            L5=name,
+                            inherited=True,
+                            lat=Lx_lat,
+                            lon=Lx_lon)
+                db(table.id == id).update(**vars)
+                # Also do the Bounds/Centroid/WKT
+                vars.update(id=id,
+                            gis_feature_type="1",
+                            )
+                feature.update(**vars)
+                bounds_centroid_wkt(feature)
             else:
                 db(table.id == id).update(path=_path,
                                           inherited=False,
@@ -4975,9 +5058,17 @@ class GIS(object):
                 # No action required
                 return path
             elif inherited or lat is None or lon is None:
-                db(table.id == id).update(inherited=True,
-                                          lat=Lx_lat,
-                                          lon=Lx_lon)
+                vars = dict(inherited=True,
+                            lat=Lx_lat,
+                            lon=Lx_lon,
+                            )
+                db(table.id == id).update(**vars)
+                # Also do the Bounds/Centroid/WKT
+                vars.update(id=id,
+                            gis_feature_type="1",
+                            )
+                feature.update(**vars)
+                bounds_centroid_wkt(feature)
         elif inherited and lat == Lx_lat and lon == Lx_lon:
             db(table.id == id).update(path=_path,
                                       L0=L0_name,
@@ -4988,16 +5079,24 @@ class GIS(object):
                                       L5=L5_name,
                                       )
         elif inherited or lat is None or lon is None:
-            db(table.id == id).update(path=_path,
-                                      L0=L0_name,
-                                      L1=L1_name,
-                                      L2=L2_name,
-                                      L3=L3_name,
-                                      L4=L4_name,
-                                      L5=L5_name,
-                                      inherited=True,
-                                      lat=Lx_lat,
-                                      lon=Lx_lon)
+            vars = dict(path=_path,
+                        L0=L0_name,
+                        L1=L1_name,
+                        L2=L2_name,
+                        L3=L3_name,
+                        L4=L4_name,
+                        L5=L5_name,
+                        inherited=True,
+                        lat=Lx_lat,
+                        lon=Lx_lon
+                        )
+            db(table.id == id).update(**vars)
+            # Also do the Bounds/Centroid/WKT
+            vars.update(id=id,
+                        gis_feature_type="1",
+                        )
+            feature.update(**vars)
+            bounds_centroid_wkt(feature)
         else:
             db(table.id == id).update(path=_path,
                                       inherited=False,
@@ -5025,7 +5124,7 @@ class GIS(object):
         messages = current.messages
         vars = form.vars
 
-        if vars.gis_feature_type == "1":
+        if vars.get("gis_feature_type", None) == "1":
             # Point
             if (vars.lon is None and vars.lat is None) or \
                (vars.lon == "" and vars.lat == ""):
@@ -5050,7 +5149,7 @@ class GIS(object):
                 if "lat_max" not in vars or vars.lat_max is None:
                     vars.lat_max = vars.lat
 
-        elif vars.wkt:
+        elif vars.get("wkt", None):
             # Parse WKT for LineString, Polygon, etc
             from shapely.wkt import loads as wkt_loads
             try:
@@ -5387,6 +5486,7 @@ class GIS(object):
                  permalink = None,
                  scaleline = None,
                  zoomcontrol = None,
+                 zoomWheelEnabled = True,
                  print_tool = {},
                  mgrs = {},
                  window = False,
@@ -5521,6 +5621,7 @@ class GIS(object):
                    permalink = permalink,
                    scaleline = scaleline,
                    zoomcontrol = zoomcontrol,
+                   zoomWheelEnabled = zoomWheelEnabled,
                    print_tool = print_tool,
                    mgrs = mgrs,
                    window = window,
@@ -5612,7 +5713,7 @@ class MAP(DIV):
         # Strings used by all Maps
         i18n = {"gis_base_layers": T("Base Layers"),
                 "gis_overlays": T(settings.get_gis_label_overlays()),
-                "gis_layers": T("Layers"),
+                "gis_layers": T(settings.get_gis_layers_label()),
                 "gis_draft_layer": T("Draft Features"),
                 "gis_cluster_multiple": T("There are multiple records at this location"),
                 "gis_loading": T("Loading"),
@@ -5879,10 +5980,10 @@ class MAP(DIV):
                     # MAP_ADMIN better for simpler deployments
                     #if auth.s3_has_permission("create", "cms_post_layer"):
                     if MAP_ADMIN:
-                        i18n["gis_metadata_create"] = T("Create Metadata")
-                        i18n["gis_metadata_edit"] = T("Edit Metadata")
+                        i18n["gis_metadata_create"] = T("Create 'More Info'")
+                        i18n["gis_metadata_edit"] = T("Edit 'More Info'")
                     else:
-                        i18n["gis_metadata"] = T("View Metadata")
+                        i18n["gis_metadata"] = T("More Info")
             else:
                 options["legend"] = True
 
@@ -5958,6 +6059,10 @@ class MAP(DIV):
             zoomcontrol = settings.get_gis_zoomcontrol()
         if not zoomcontrol:
             options["zoomcontrol"] = False
+
+        zoomWheelEnabled = opts.get("zoomWheelEnabled", True)
+        if not zoomWheelEnabled:
+            options["no_zoom_wheel"] = True
 
         ########
         # Layers
@@ -7554,7 +7659,7 @@ class LayerTheme(Layer):
                       }
 
             # Attributes which are defaulted client-side if not set
-            self.setup_folder_and_visibility(output)
+            self.setup_folder_visibility_and_opacity(output)
             self.setup_clustering(output)
             style = self.style
             if style:

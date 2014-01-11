@@ -308,7 +308,7 @@ div.form-container form fieldset input.errorfield {
 .action-btn,
 .delete-btn-ajax,
 .delete-btn {
-    color: #fff;
+    color: #fff !important;
     background-color: #590f12;
     border: #c6bea7;
     border-bottom: #164b8b;
@@ -346,4 +346,14 @@ span.tab_prev_active {
 }
 span.tab_next_active {
     color: #000000;
+}
+
+/* Ensure jQueryUI Dialog Modal Popup goes above header */
+.ui-front {
+    z-index: 999;
+}
+
+/* Default width 100px doesn't allow 'Enter keywords' to be visible */
+.ui-multiselect-filter input {
+    width: auto;
 }

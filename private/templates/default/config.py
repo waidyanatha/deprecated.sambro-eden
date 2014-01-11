@@ -274,6 +274,12 @@ settings.L10n.decimal_separator = "."
 # False = owned by any authenticated user
 #settings.security.strict_ownership = False
 
+# Audit
+# - can be a callable for custom hooks (return True to also perform normal logging, or False otherwise)
+# NB Auditing (especially Reads) slows system down & consumes diskspace
+#settings.security.audit_read = True
+#settings.security.audit_write = True
+
 # Lock-down access to Map Editing
 #settings.security.map = True
 # Allow non-MapAdmins to edit hierarchy locations? Defaults to True if not set.
@@ -638,11 +644,11 @@ settings.modules = OrderedDict([
     )),
     # All modules below here should be possible to disable safely
 #    ("hrm", Storage(
-#       name_nice = T("Staff"),
-#       #description = "Human Resources Management",
-#       restricted = True,
-#       module_type = 2,
-#   )),
+#        name_nice = T("Staff"),
+#        #description = "Human Resources Management",
+#        restricted = True,
+#        module_type = 2,
+#    )),
 #    ("vol", Storage(
 #        name_nice = T("Volunteers"),
 #        #description = "Human Resources Management",
@@ -656,11 +662,11 @@ settings.modules = OrderedDict([
 #      module_type = 10,
 #    )),
 #    ("doc", Storage(
-#       name_nice = T("Documents"),
-#       #description = "A library of digital resources, such as photos, documents and reports",
-#      restricted = True,
-#       module_type = 10,
-#   )),
+#        name_nice = T("Documents"),
+#        #description = "A library of digital resources, such as photos, documents and reports",
+#        restricted = True,
+#        module_type = 10,
+#    )),
     ("msg", Storage(
         name_nice = T("Messaging"),
         #description = "Sends & Receives Alerts via Email & SMS",
@@ -670,7 +676,7 @@ settings.modules = OrderedDict([
     )),
 #    ("supply", Storage(
 #        name_nice = T("Supply Chain Management"),
-        #description = "Used within Inventory Management, Request Management and Asset Management",
+#        #description = "Used within Inventory Management, Request Management and Asset Management",
 #        restricted = True,
 #        module_type = None, # Not displayed
 #    )),
@@ -701,13 +707,13 @@ settings.modules = OrderedDict([
 #    )),
 #    ("req", Storage(
 #        name_nice = T("Requests"),
-        #description = "Manage requests for supplies, assets, staff or other resources. Matches against Inventories where supplies are requested.",
+#        #description = "Manage requests for supplies, assets, staff or other resources. Matches against Inventories where supplies are requested.",
 #        restricted = True,
 #        module_type = 10,
 #    )),
 #    ("project", Storage(
 #        name_nice = T("Projects"),
-        #description = "Tracking of Projects, Activities and Tasks",
+#        #description = "Tracking of Projects, Activities and Tasks",
 #        restricted = True,
 #        module_type = 2
 #    )),
@@ -719,13 +725,13 @@ settings.modules = OrderedDict([
 #    )),
 #    ("cr", Storage(
 #        name_nice = T("Shelters"),
-        #description = "Tracks the location, capacity and breakdown of victims in Shelters",
+#        #description = "Tracks the location, capacity and breakdown of victims in Shelters",
 #        restricted = True,
 #        module_type = 10
 #    )),
 #    ("hms", Storage(
 #        name_nice = T("Hospitals"),
-        #description = "Helps to monitor status of hospitals",
+#        #description = "Helps to monitor status of hospitals",
 #        restricted = True,
 #        module_type = 10
 #    )),
@@ -733,20 +739,18 @@ settings.modules = OrderedDict([
         name_nice = T("Incidents"),
         #description = "Incident Reporting System",
         restricted = True,
-        module_type = 10
+        module_type = 7
     )),
 #    ("dvi", Storage(
 #       name_nice = T("Disaster Victim Identification"),
-       #description = "Disaster Victim Identification",
+#       #description = "Disaster Victim Identification",
 #       restricted = True,
 #       module_type = 10,
-       #access = "|DVI|",      # Only users with the DVI role can see this module in the default menu & access the controller
-       #audit_read = True,     # Can enable Audit for just an individual module here
-       #audit_write = True
+#       #access = "|DVI|",      # Only users with the DVI role can see this module in the default menu & access the controller
 #    )),
 #    ("dvr", Storage(
 #       name_nice = T("Disaster Victim Registry"),
-       #description = "Allow affected individuals & households to register to receive compensation and distributions",
+#       #description = "Allow affected individuals & households to register to receive compensation and distributions",
 #       restricted = True,
 #       module_type = 10,
 #    )),
@@ -754,7 +758,7 @@ settings.modules = OrderedDict([
         name_nice = T("Events"),
         #description = "Activate Events (e.g. from Scenario templates) for allocation of appropriate Resources (Human, Assets & Facilities).",
         restricted = True,
-        module_type = 10,
+        module_type = 8
     )),
 #    ("transport", Storage(
 #       name_nice = T("Transport"),
@@ -791,7 +795,7 @@ settings.modules = OrderedDict([
     #       restricted = True,
     #       module_type = 1,
     #   )),
-    #("flood", Storage(
+    #("water", Storage(
     #        name_nice = T("Flood Warnings"),
     #        #description = "Flood Gauges show water levels in various parts of the country",
     #        restricted = True,
@@ -816,12 +820,12 @@ settings.modules = OrderedDict([
     #       module_type = 10,
     #   )),
     # These are specialist modules
-    #("cap", Storage(
-    #        name_nice = T("CAP"),
-    #        #description = "Create & broadcast CAP alerts",
-    #        restricted = True,
-    #        module_type = 10,
-    #)),
+    ("cap", Storage(
+            name_nice = T("CAP"),
+            description = "Create & broadcast CAP alerts",
+            restricted = True,
+            module_type = 9,
+    )),
     # Requires RPy2 & PostgreSQL
     #("climate", Storage(
     #        name_nice = T("Climate"),

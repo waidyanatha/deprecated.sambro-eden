@@ -14,7 +14,7 @@
  */
 
 // Module pattern to hide internal vars
-(function () {
+(function() {
 
     /**
      * Instantiate a LocationSelector
@@ -89,6 +89,27 @@
         // Initial population of dropdown(s)
         if (L0) {
             lx_select(fieldname, 0, L0);
+        } else {
+            // Show the Country row
+            L0_row.show();
+            // Populate with values
+            var values = [];
+            for (var i in l) {
+                v = l[i];
+                if (v['l'] == 0) {
+                    v['i'] = i;
+                    values.push(v);
+                }
+            }
+            values.sort(nameSort);
+            var _id, location, option, selected;
+            var select = $(selector + '_L0');
+            for (var i=0, len=values.length; i < len; i++) {
+                location = values[i];
+                _id = location['i'];
+                option = '<option value="' + _id + '">' + location['n'] + '</option>';
+                select.append(option);
+            }
         }
         if (L1) {
             lx_select(fieldname, 1, L1);
@@ -162,18 +183,55 @@
             $(selector + '_L' + level).val(id);
         } else {
             // Read the selected value from the dropdown
-            id = $(selector + '_L' + level).val();
+            id = parseInt($(selector + '_L' + level).val());
         }
-        //if (level === 0) {
-            // @ToDo: This data structure doesn't exist yet (not required for TLDRMP)
+        if (level === 0) {
             // Set Labels
-            //var h = hdata[id];
-            //$(selector + '_L1__row label').html(h.l1 + ':');
-            //$(selector + '_L2__row label').html(h.l2 + ':');
-            //$(selector + '_L3__row label').html(h.l3 + ':');
-            //$(selector + '_L4__row label').html(h.l4 + ':');
-            //$(selector + '_L5__row label').html(h.l5 + ':');
-        //}
+            var hi = h[id];
+            if (hi == undefined) {
+                // Read the values from server
+                var url = S3.Ap.concat('/gis/hdata/' + id);
+                $.ajaxS3({
+                    async: false,
+                    url: url,
+                    dataType: 'script',
+                    success: function(data) {
+                        // Copy the elements across
+                        hi = {};
+                        for (var prop in n) {
+                            hi[prop] = n[prop];
+                        }
+                        h[id] =  hi;
+                        // Clear the memory
+                        n = null;
+                    },
+                    error: function(request, status, error) {
+                        if (error == 'UNAUTHORIZED') {
+                            msg = i18n.gis_requires_login;
+                        } else {
+                            msg = request.responseText;
+                        }
+                        s3_debug(msg);
+                        // Ugly, but better than hiding completely
+                        //alert(msg);
+                        // Revert state of widget to allow user to retry without reloading page
+                        // - not necessary since this is just labels & we already have fallback
+                    }
+                });
+            }
+            // Use default values as fallback if no value specified
+            var d = h['d'];
+            var label = hi['1'] || d['1'];
+            $(selector + '_L1__row label').html(label + ':');
+            label = hi['2'] || d['2'];
+            $(selector + '_L2__row label').html(label + ':');
+            label = hi['3'] || d['3'];
+            $(selector + '_L3__row label').html(label + ':');
+            label = hi['4'] || d['4'];
+            $(selector + '_L4__row label').html(label + ':');
+            label = hi['5'] || d['5'];
+            $(selector + '_L5__row label').html(label + ':');
+        }
         if (id) {
             // Hide all lower levels
             // & remove their values
@@ -301,26 +359,36 @@
 
         // Download Location Data
         var url = S3.Ap.concat('/gis/ldata/' + id);
-        $.ajax({
+        $.ajaxS3({
             async: false,
             url: url,
-            dataType: 'script'
-        }).done(function(data) {
-            // Copy the elements across
-            for (var prop in n) {
-                l[prop] = n[prop];
-            }
-            // Clear the memory
-            n = null;
-            // Hide Throbber
-            throbber.hide();
-            // Show dropdown
-            dropdown.show();
-        }).fail(function(request, status, error) {
-            if (error == 'UNAUTHORIZED') {
-                msg = i18n.gis_requires_login;
-            } else {
-                msg = request.responseText;
+            dataType: 'script',
+            success: function(data) {
+                // Copy the elements across
+                for (var prop in n) {
+                    l[prop] = n[prop];
+                }
+                // Clear the memory
+                n = null;
+                // Hide Throbber
+                throbber.hide();
+                // Show dropdown
+                dropdown.show();
+            },
+            error: function(request, status, error) {
+                if (error == 'UNAUTHORIZED') {
+                    msg = i18n.gis_requires_login;
+                } else {
+                    msg = request.responseText;
+                }
+                s3_debug(msg);
+                // Ugly, but better than hiding completely
+                alert(msg);
+                // Revert state of widget to allow user to retry without reloading page
+                // Hide Throbber
+                throbber.hide();
+                // Show dropdown
+                dropdown.show();
             }
         });
     }
@@ -464,52 +532,54 @@
 
         // Submit to Geocoder
         var url = S3.Ap.concat('/gis/geocode');
-        $.ajax({
+        $.ajaxS3({
             async: false,
             url: url,
             type: 'POST',
             data: post_data,
-            dataType: 'json'
-        }).done(function(data) {
-            var lat = data.lat;
-            var lon = data.lon;
-            if (lat || lon) {
-                // Update fields
-                $(selector + '_lat').val(lat);
-                $(selector + '_lon').val(lon);
-                // If Map Showing then add/move Point
-                gis = S3.gis
-                if (gis.maps) {
-                    var map_id = 'location_selector_' + fieldname;
-                    var map = gis.maps[map_id];
-                    if (map) {
-                        var draftLayer = map.s3.draftLayer
-                        draftLayer.removeAllFeatures();
-                        var geometry = new OpenLayers.Geometry.Point(parseFloat(lon), parseFloat(lat));
-                        geometry.transform(gis.proj4326, map.getProjectionObject());
-                        var feature = new OpenLayers.Feature.Vector(geometry);
-                        draftLayer.addFeatures([feature]);
+            dataType: 'json',
+            success: function(data) {
+                var lat = data.lat;
+                var lon = data.lon;
+                if (lat || lon) {
+                    // Update fields
+                    $(selector + '_lat').val(lat);
+                    $(selector + '_lon').val(lon);
+                    // If Map Showing then add/move Point
+                    gis = S3.gis
+                    if (gis.maps) {
+                        var map_id = 'location_selector_' + fieldname;
+                        var map = gis.maps[map_id];
+                        if (map) {
+                            var draftLayer = map.s3.draftLayer
+                            draftLayer.removeAllFeatures();
+                            var geometry = new OpenLayers.Geometry.Point(parseFloat(lon), parseFloat(lat));
+                            geometry.transform(gis.proj4326, map.getProjectionObject());
+                            var feature = new OpenLayers.Feature.Vector(geometry);
+                            draftLayer.addFeatures([feature]);
+                        }
                     }
+                    // Notify results
+                    throbber.hide();
+                    success.html(i18n.address_mapped).removeClass('hide').show();
+                } else {
+                    // Notify results
+                    throbber.hide();
+                    fail.html(i18n.address_not_mapped).removeClass('hide').show();
+                    s3_debug(data);
+                }
+            },
+            error: function(request, status, error) {
+                if (error == 'UNAUTHORIZED') {
+                    msg = i18n.gis_requires_login;
+                } else {
+                    msg = request.responseText;
                 }
                 // Notify results
                 throbber.hide();
-                success.removeClass('hide').show();
-            } else {
-                // Notify results
-                throbber.hide();
-                fail.removeClass('hide').show();
-                s3_debug(data);
+                fail.html(i18n.address_not_mapped).removeClass('hide').show();
+                s3_debug(msg);
             }
-        }).fail(function(request, status, error) {
-            if (error == 'UNAUTHORIZED') {
-                msg = i18n.gis_requires_login;
-            } else {
-                msg = request.responseText;
-            }
-            // Notify results
-            throbber.hide();
-            fail.removeClass('hide').show();
-            s3_debug(msg);
         });
     }
 
@@ -536,56 +606,58 @@
 
         // Submit to Geocoder
         var url = S3.Ap.concat('/gis/geocode_r');
-        $.ajax({
+        $.ajaxS3({
             async: false,
             url: url,
             type: 'POST',
             data: post_data,
-            dataType: 'json'
-        }).done(function(data) {
-            if (data.L0) {
-                // Update fields
-                $(selector + '_L0_input').val(data.L0);
-                $(selector + '_L0').val(data.L0);
-                if (data.L1) {
-                    $(selector + '_L1_input').val(data.L1);
-                    $(selector + '_L1').val(data.L1);
+            dataType: 'json',
+            success: function(data) {
+                if (data.L0) {
+                    // Update fields
+                    $(selector + '_L0_input').val(data.L0);
+                    $(selector + '_L0').val(data.L0);
+                    if (data.L1) {
+                        $(selector + '_L1_input').val(data.L1);
+                        $(selector + '_L1').val(data.L1);
+                    }
+                    if (data.L2) {
+                        $(selector + '_L2_input').val(data.L2);
+                        $(selector + '_L2').val(data.L2);
+                    }
+                    if (data.L3) {
+                        $(selector + '_L3_input').val(data.L3);
+                        $(selector + '_L3').val(data.L3);
+                    }
+                    if (data.L4) {
+                        $(selector + '_L4_input').val(data.L4);
+                        $(selector + '_L4').val(data.L4);
+                    }
+                    if (data.L5) {
+                        $(selector + '_L5_input').val(data.L5);
+                        $(selector + '_L5').val(data.L5);
+                    }
+                    // Notify results
+                    throbber.hide();
+                    success.html(i18n.location_found).removeClass('hide').show();
+                } else {
+                    // Notify results
+                    throbber.hide();
+                    fail.html(i18n.location_not_found).removeClass('hide').show();
+                    //s3_debug(data);
                 }
-                if (data.L2) {
-                    $(selector + '_L2_input').val(data.L2);
-                    $(selector + '_L2').val(data.L2);
-                }
-                if (data.L3) {
-                    $(selector + '_L3_input').val(data.L3);
-                    $(selector + '_L3').val(data.L3);
-                }
-                if (data.L4) {
-                    $(selector + '_L4_input').val(data.L4);
-                    $(selector + '_L4').val(data.L4);
-                }
-                if (data.L5) {
-                    $(selector + '_L5_input').val(data.L5);
-                    $(selector + '_L5').val(data.L5);
+            },
+            error: function(request, status, error) {
+                if (error == 'UNAUTHORIZED') {
+                    msg = i18n.gis_requires_login;
+                } else {
+                    msg = request.responseText;
                 }
                 // Notify results
                 throbber.hide();
-                success.removeClass('hide').show();
-            } else {
-                // Notify results
-                throbber.hide();
-                fail.removeClass('hide').show();
-                //s3_debug(data);
+                fail.html(i18n.location_not_found).removeClass('hide').show();
+                s3_debug(msg);
             }
-        }).fail(function(request, status, error) {
-            if (error == 'UNAUTHORIZED') {
-                msg = i18n.gis_requires_login;
-            } else {
-                msg = request.responseText;
-            }
-            // Notify results
-            throbber.hide();
-            fail.removeClass('hide').show();
-            s3_debug(msg);
         });
     }
 
@@ -697,8 +769,10 @@
                         lonfield.val(centerPoint.lon);
                         // Store the fact that we've now added Marker manually
                         real_input.data('manually_geocoded', true);
+                        //if (!$(selector + '_address').val()) {
                         // Reverse Geocode the Point
                         geocode_r(fieldname);
+                        //}
                     } else {
                         // Polygon
                         var WKT = geometry.transform(map.getProjectionObject(), gis.proj4326).toString();

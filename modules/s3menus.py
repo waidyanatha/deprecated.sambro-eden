@@ -1265,9 +1265,9 @@ class S3OptionsMenu(object):
                         M("List templates", f="template", vars={'alert.is_template': 'true'}),
                         M("Create template", f="template", m="create"),
                     ),
-                    #M("CAP Profile", f="profile")(
-                    #    M("Edit profile", f="profile")
-                    #)
+                    M("CAP Profile", f="profile")(
+                        M("Edit profile", f="profile")
+                    )
                 )
 
     # -------------------------------------------------------------------------
@@ -1373,7 +1373,7 @@ class S3OptionsMenu(object):
                         M("Add Disaster Assessments", m="create"),
                         M("List All"),
                     ),
-                    M("Administration", f="complete", restrict=[ADMIN])(
+                    M("Administration", f="admin", restrict=[ADMIN])(
                         #M("New", m="create"),
                         #M("List All"),
                         M("Import Templates", f="question_list",

@@ -209,6 +209,7 @@ Thank you
         #self.messages.logged_in = "Signed In"
         #self.messages.submit_button = "Signed In"
         #self.messages.logged_out = "Signed Out"
+        self.messages.profile_save_button = "Apply changes"
         self.messages.lock_keys = True
 
         # S3Permission
@@ -1437,93 +1438,105 @@ S3OptionsFilter({
 
         db = current.db
         s3db = current.s3db
-        cache = s3db.cache
+        update_super = s3db.update_super
         otable = s3db.org_organisation
 
         resource, tree = data
 
         # Memberships
         elements = tree.getroot().xpath("/s3xml//resource[@name='auth_membership']/data[@field='pe_id']")
-        pe_values = set()
+        looked_up = dict(org_organisation = {})
         for element in elements:
             pe_string = element.text
 
             if pe_string and "=" in pe_string:
                 pe_type, pe_value =  pe_string.split("=")
-                if pe_value in pe_values:
+                pe_tablename, pe_field =  pe_type.split(".")
+                if pe_tablename in looked_up and \
+                   pe_value in looked_up[pe_tablename]:
+                    # Replace string with pe_id
+                    element.text = looked_up[pe_tablename][pe_value]["pe_id"]
                     # Don't check again
                     continue
-                else:
-                    pe_values.add(pe_value)
-                pe_tablename, pe_field =  pe_type.split(".")
 
                 if pe_tablename == "org_organisation":
                     table = otable
                 else:
                     table = s3db[pe_tablename]
-                record = db(table[pe_field] == pe_value).select(table.pe_id,
-                                                                #cache=cache,
+                    if pe_tablename not in looked_up:
+                        looked_up[pe_tablename] = {}
+                record = db(table[pe_field] == pe_value).select(table.id, # Stored for Org/Groups later
+                                                                table.pe_id,
                                                                 limitby=(0, 1)
                                                                 ).first()
-                if record:
-                    element.text = str(record.pe_id)
-                else:
+                if not record:
                     # Add a new record
                     id = table.insert(**{pe_field: pe_value})
-                    record = db(table._id == id).select(table._id,
-                                                        limitby=(0, 1)).first()
-                    s3db.update_super(table, record)
-                    element.text = str(record.pe_id)
+                    update_super(table, Storage(id=id))
+                    record = db(table.id == id).select(table.id,
+                                                       table.pe_id,
+                                                       limitby=(0, 1)).first()
+                new_value = str(record.pe_id)
+                # Replace string with pe_id
+                element.text = new_value
+                # Store in case we get called again with same value
+                looked_up[pe_tablename][pe_value] = dict(pe_id=new_value,
+                                                         id=str(record.id),
+                                                         )
 
         # Organisations
         elements = tree.getroot().xpath("/s3xml//resource[@name='auth_user']/data[@field='organisation_id']")
-        names = set()
+        orgs = looked_up["org_organisation"]
         for element in elements:
             name = element.text
-            if name in names:
-                continue
-            else:
+            if name in orgs:
+                # Replace string with id
+                element.text = orgs[name]["id"]
                 # Don't check again
-                names.add(name)
-            if name:
-                record = db(otable.name == name).select(otable.id,
-                                                        #cache=cache,
-                                                        limitby=(0, 1)
-                                                        ).first()
-                if record:
-                    element.text = str(record.id)
-                else:
-                    # Add a new record
-                    id = otable.insert(name=name)
-                    element.text = str(id)
-                    record = Storage(id=id)
-                    s3db.update_super(otable, record)
+                continue
+
+            record = db(otable.name == name).select(otable.id,
+                                                    limitby=(0, 1)
+                                                    ).first()
+            if record:
+                id = record.id
+            else:
+                # Add a new record
+                id = otable.insert(name=name)
+                update_super(otable, Storage(id=id))
+            # Replace string with id
+            id = str(id)
+            element.text = id
+            # Store in case we get called again with same value
+            orgs[name] = dict(id=id)
 
         # Organisation Groups
         elements = tree.getroot().xpath("/s3xml//resource[@name='auth_user']/data[@field='org_group_id']")
         if elements:
             gtable = s3db.org_group
-            names = set()
+            org_groups = looked_up.get("org_organisation_group", {})
             for element in elements:
                 name = element.text
-                if name in names:
+                if name in org_groups:
+                    # Replace string with id
+                    element.text = org_groups[name]["id"]
                     # Don't check again
                     continue
+
+                record = db(gtable.name == name).select(gtable.id,
+                                                        limitby=(0, 1)
+                                                        ).first()
+                if record:
+                    id = record.id
                 else:
-                    names.add(name)
-                if name:
-                    record = db(gtable.name == name).select(gtable.id,
-                                                            #cache=cache,
-                                                            limitby=(0, 1)
-                                                            ).first()
-                    if record:
-                        element.text = str(record.id)
-                    else:
-                        # Add a new record
-                        id = gtable.insert(name=name)
-                        element.text = str(id)
-                        record = Storage(id=id)
-                        s3db.update_super(gtable, record)
+                    # Add a new record
+                    id = gtable.insert(name=name)
+                    update_super(gtable, Storage(id=id))
+                # Replace string with id
+                id = str(id)
+                element.text = id
+                # Store in case we get called again with same value
+                org_groups[name] = dict(id=id)
 
     # =============================================================================
     @staticmethod
@@ -1600,6 +1613,12 @@ S3OptionsFilter({
         js_append('''i18n.please_enter_valid_email="%s"''' % T("Please enter a valid email address"))
 
         js_append('''S3.password_min_length=%i''' % settings.get_auth_password_min_length())
+        js_append('''i18n.password_min_chars="%s"''' % T("You must enter a minimum of %d characters"))
+        js_append('''i18n.weak="%s"''' % T("Weak"))
+        js_append('''i18n.normal="%s"''' % T("Normal"))
+        js_append('''i18n.medium="%s"''' % T("Medium"))
+        js_append('''i18n.strong="%s"''' % T("Strong"))
+        js_append('''i18n.very_strong="%s"''' % T("Very Strong"))
 
         script = '''\n'''.join(js_global)
         s3.js_global.append(script)
@@ -4574,7 +4593,7 @@ class S3Permission(object):
                                    "default/about")
 
         # Default landing pages
-        _next = URL(args=request.args, vars=request.vars)
+        _next = URL(args=request.args, vars=request.get_vars)
         self.homepage = URL(c="default", f="index")
         self.loginpage = URL(c="default", f="user", args="login",
                              vars=dict(_next=_next))
@@ -6099,41 +6118,48 @@ class S3Audit(object):
             @note: this defines the audit table
         """
 
+        settings = current.deployment_settings
+        audit_read = settings.get_security_audit_read()
+        audit_write = settings.get_security_audit_write()
+        if not audit_read and not audit_write:
+            # Auditing is Disabled
+            self.table = None
+            return
+
         db = current.db
         if tablename in db:
             self.table = db[tablename]
         else:
-            self.table = None
-        if not self.table:
             self.table = db.define_table(tablename,
-                            Field("timestmp", "datetime"),
-                            Field("person", "integer"),
-                            Field("operation"),
-                            Field("tablename"),
-                            Field("record", "integer"),
-                            Field("representation"),
-                            Field("old_value", "text"),
-                            Field("new_value", "text"),
-                            migrate=migrate,
-                            fake_migrate=fake_migrate)
-        session = current.session
-        self.auth = session.auth
-        if session.auth and session.auth.user:
-            self.user = session.auth.user.id
-        else:
-            self.user = None
+                                         Field("timestmp", "datetime"),
+                                         Field("user_id", db.auth_user),
+                                         Field("method"),
+                                         Field("tablename"),
+                                         Field("record_id", "integer"),
+                                         Field("representation"),
+                                         # List of Key:Values
+                                         Field("old_value", "text"),
+                                         # List of Key:Values
+                                         Field("new_value", "text"),
+                                         migrate=migrate,
+                                         fake_migrate=fake_migrate,
+                                         )
 
-        self.diff = None
+        user = current.auth.user
+        if user:
+            self.user_id = user.id
+        else:
+            self.user_id = None
 
     # -------------------------------------------------------------------------
-    def __call__(self, operation, prefix, name,
+    def __call__(self, method, prefix, name,
                  form=None,
                  record=None,
                  representation="unknown"):
         """
             Audit
 
-            @param operation: Operation to log, one of
+            @param method: Method to log, one of
                 "create", "update", "read", "list" or "delete"
             @param prefix: the module prefix of the resource
             @param name: the name of the resource (without prefix)
@@ -6142,22 +6168,14 @@ class S3Audit(object):
             @param representation: the representation format
         """
 
-        settings = current.deployment_settings
-
-        audit_read = settings.get_security_audit_read()
-        audit_write = settings.get_security_audit_write()
-
-        if not audit_read and not audit_write:
+        table = self.table
+        if not table:
+            # Auditing Disabled
             return True
 
-        #import sys
-        #print >> sys.stderr, "Audit %s: %s_%s record=%s representation=%s" % \
-                             #(operation, prefix, name, record, representation)
-
-        now = datetime.datetime.utcnow()
-        db = current.db
-        table = self.table
-        tablename = "%s_%s" % (prefix, name)
+        #if DEBUG:
+        #    _debug("Audit %s: %s_%s record=%s representation=%s" % \
+        #           (method, prefix, name, record, representation))
 
         if record:
             if isinstance(record, Row):
@@ -6184,50 +6202,192 @@ class S3Audit(object):
         else:
             record = None
 
-        if operation in ("list", "read"):
+        now = datetime.datetime.utcnow()
+        tablename = "%s_%s" % (prefix, name)
+
+        settings = current.deployment_settings
+        audit_read = settings.get_security_audit_read()
+        if callable(audit_read):
+            audit_read = audit_read(method, tablename, form, record,
+                                    representation)
+        audit_write = settings.get_security_audit_write()
+        if callable(audit_write):
+            audit_write = audit_write(method, tablename, form, record,
+                                      representation)
+
+        if method in ("list", "read"):
             if audit_read:
                 table.insert(timestmp = now,
-                             person = self.user,
-                             operation = operation,
+                             user_id = self.user_id,
+                             method = method,
                              tablename = tablename,
-                             record = record,
-                             representation = representation)
+                             record_id = record,
+                             representation = representation,
+                             )
 
-        elif operation in ("create", "update"):
+        elif method == "create":
             if audit_write:
                 if form:
-                    record = form.vars.id
-                    new_value = ["%s:%s" % (var, str(form.vars[var]))
-                                 for var in form.vars]
+                    vars = form.vars
+                    if not record:
+                        record = vars["id"]
+                    new_value = ["%s:%s" % (var, str(vars[var]))
+                                 for var in vars if vars[var]]
                 else:
                     new_value = []
                 table.insert(timestmp = now,
-                             person = self.user,
-                             operation = operation,
+                             user_id = self.user_id,
+                             method = method,
                              tablename = tablename,
-                             record = record,
+                             record_id = record,
                              representation = representation,
-                             new_value = new_value)
-                self.diff = None
+                             new_value = new_value,
+                             )
 
-        elif operation == "delete":
+        elif method == "update":
             if audit_write:
-                query = db[tablename].id == record
+                if form:
+                    rvars = form.record
+                    if rvars:
+                        old_value = ["%s:%s" % (var, str(rvars[var]))
+                                     for var in rvars]
+                    else:
+                        old_value = []
+                    fvars = form.vars
+                    if not record:
+                        record = fvars["id"]
+                    new_value = ["%s:%s" % (var, str(fvars[var]))
+                                 for var in fvars]
+                else:
+                    new_value = []
+                    old_value = []
+                table.insert(timestmp = now,
+                             user_id = self.user_id,
+                             method = method,
+                             tablename = tablename,
+                             record_id = record,
+                             representation = representation,
+                             old_value = old_value,
+                             new_value = new_value,
+                             )
+
+        elif method == "delete":
+            if audit_write:
+                db = current.db
+                query = (db[tablename].id == record)
                 row = db(query).select(limitby=(0, 1)).first()
                 old_value = []
                 if row:
                     old_value = ["%s:%s" % (field, row[field])
                                  for field in row]
                 table.insert(timestmp = now,
-                             person = self.user,
-                             operation = operation,
+                             user_id = self.user_id,
+                             method = method,
                              tablename = tablename,
-                             record = record,
+                             record_id = record,
                              representation = representation,
-                             old_value = old_value)
-                self.diff = None
+                             old_value = old_value,
+                             )
 
         return True
+
+    # -------------------------------------------------------------------------
+    def represent(self, records):
+        """
+            Provide a Human-readable representation of Audit records
+            - currently unused
+
+            @param record: the record IDs
+        """
+
+        table = self.table
+        # Retrieve the records
+        if isinstance(records, int):
+            limit = 1
+            query = (table.id == records)
+        else:
+            limit = len(records)
+            query = (table.id.belongs(records))
+        records = current.db(query).select(table.tablename,
+                                           table.method,
+                                           table.user_id,
+                                           table.old_value,
+                                           table.new_value,
+                                           limitby=(0, limit)
+                                           )
+
+        # Convert to Human-readable form
+        s3db = current.s3db
+        output = []
+        oappend = output.append
+        for record in records:
+            table = s3db[tablename]
+            method = record.method
+            if method == "create":
+                new_value = record.new_value
+                if not new_value:
+                    continue
+                diff = []
+                dappend = diff.append
+                for v in new_value:
+                    fieldname, value = v.split(":", 1)
+                    represent = table[fieldname].represent
+                    if represent:
+                        value = represent(value)
+                    label = table[fieldname].label or fieldname
+                    dappend("%s is %s" % (label, value))
+
+            elif method == "update":
+                old_values = record.old_value
+                new_values = record.new_value
+                if not new_value:
+                    continue
+                changed = {}
+                for v in new_values:
+                    fieldname, new_value = v.split(":", 1)
+                    old_value = old_values.get(fieldname, None)
+                    if new_value != old_value:
+                        type = table[fieldname].type
+                        if type == "integer" or \
+                           type.startswith("reference"):
+                            if new_value:
+                                new_value = int(new_value)
+                            if new_value == old_value:
+                                continue
+                        represent = table[fieldname].represent
+                        if represent:
+                            new_value = represent(new_value)
+                        label = table[fieldname].label or fieldname
+                        if old_value:
+                            if represent:
+                                old_value = represent(old_value)
+                            changed[fieldname] = "%s changed from %s to %s" % \
+                                (label, old_value, new_value)
+                        else:
+                            changed[fieldname] = "%s changed to %s" % \
+                                (label, new_value)
+                diff = []
+                dappend = diff.append
+                for fieldname in changed:
+                    dappend(changed[fieldname])
+
+            elif method == "delete":
+                old_value = record.old_value
+                if not old_value:
+                    continue
+                diff = []
+                dappend = diff.append
+                for v in old_value:
+                    fieldname, value = v.split(":", 1)
+                    represent = table[fieldname].represent
+                    if represent:
+                        value = represent(value)
+                    label = table[fieldname].label or fieldname
+                    dappend("%s was %s" % (label, value))
+
+            oappend("\n".join(diff))
+
+        return output
 
 # =============================================================================
 class S3RoleManager(S3Method):

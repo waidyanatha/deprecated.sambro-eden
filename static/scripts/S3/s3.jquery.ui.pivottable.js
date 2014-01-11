@@ -30,7 +30,11 @@
             collapseFilter: false,
             collapseOptions: true,
             collapseChart: true,
-            collapseTable: false
+            collapseTable: false,
+
+            exploreChart: false,
+
+            autoSubmit: 1000
         },
 
         _create: function() {
@@ -151,6 +155,11 @@
                 $(el).find('.pt-empty').show();
             } else {
                 $(el).find('.pt-empty').hide();
+            }
+            if (this.options.autoSubmit) {
+                $(el).find('.pt-submit').hide();
+            } else {
+                $(el).find('.pt-submit').show();
             }
             this._bindEvents();
 
@@ -413,6 +422,16 @@
             // Show the chart options
             $(container).append(chart_opts);
         },
+
+        _truncateLabel: function(label, len) {
+
+            if (label.length > len) {
+                return label.substring(0, len-3).replace(/\s+$/g,'') + '...';
+            } else {
+                return label;
+            }
+            
+        },
         
         _renderChart: function(chart_options) {
             // Render the chart (according to current options)
@@ -561,27 +580,29 @@
             });
 
             // Click-link to filtered URL
-            if (filter_url && selector) {
-                $(chart).bind('plotclick', function(event, pos, item) {
-                    if (item) {
-                        var filter={};
-                        try {
-                            filter[selector] = items[item.seriesIndex]['key'];
+            if (this.options.exploreChart) {
+                if (filter_url && selector) {
+                    $(chart).bind('plotclick', function(event, pos, item) {
+                        if (item) {
+                            try {
+                                var filter = [[selector, items[item.seriesIndex]['key']]];
+                            }
+                            catch(e) {
+                                return;
+                            }
+                            var page = pt._updateURL(filter_url, filter);
+                            window.open(page, '_blank');
                         }
-                        catch(e) {
-                            return;
-                        }
-                        var page = pt._updateURL(filter_url, filter);
-                        window.open(page, '_blank');
-                    }
-                });
+                    });
+                }
             }
         },
 
         _renderBarChart: function(data, title, filter_url, selector) {
             // Render a (vertical) bar chart
 
-            var chart = this.chart;
+            var chart = this.chart,
+                truncateLabel = this._truncateLabel;
             if (!chart) {
                 return;
             }
@@ -597,7 +618,7 @@
                         data: [[idx+1, item[2]]],
                         key: item[3]
                     });
-                    labels.push([idx+1, item[4]]);
+                    labels.push([idx+1, truncateLabel(item[4], 16)]);
                     idx++;
                 }
             }
@@ -631,9 +652,13 @@
                         min: 0,
                         max: items.length+1,
                         tickLength: 0
+                        // Rotate labels with jquery.flot.tickrotor.js:
+                        // rotateTicks: 135
                     }
                 }
             );
+            // jquery.flot.tickrotor.js doesn't hide the original labels:
+            // $('.xAxis .tickLabel').hide();
 
             var pt = this;
 
@@ -658,20 +683,21 @@
             });
             
             // Click-link to filtered URL
-            if (filter_url && selector) {
-                $(chart).bind('plotclick', function(event, pos, item) {
-                    if (item) {
-                        var filter={};
-                        try {
-                            filter[selector] = items[item.seriesIndex]['key'];
+            if (this.options.exploreChart) {
+                if (filter_url && selector) {
+                    $(chart).bind('plotclick', function(event, pos, item) {
+                        if (item) {
+                            try {
+                                var filter = [[selector, items[item.seriesIndex]['key']]];
+                            }
+                            catch(e) {
+                                return;
+                            }
+                            var page = pt._updateURL(filter_url, filter);
+                            window.open(page, '_blank');
                         }
-                        catch(e) {
-                            return;
-                        }
-                        var page = pt._updateURL(filter_url, filter);
-                        window.open(page, '_blank');
-                    }
-                });
+                    });
+                }
             }
         },
 
@@ -817,21 +843,22 @@
             });
 
             // Click-link to filtered URL
-            if (filter_url && rows_selector && cols_selector) {
-                $(chart).bind('plotclick', function(event, pos, item) {
-                    if (item) {
-                        var filter = {};
-                        try {
-                            filter[rows_selector] = rows[item.dataIndex][3];
-                            filter[cols_selector] = cols[item.seriesIndex][3];
+            if (this.options.exploreChart) {
+                if (filter_url && rows_selector && cols_selector) {
+                    $(chart).bind('plotclick', function(event, pos, item) {
+                        if (item) {
+                            try {
+                                var filter = [[rows_selector, rows[item.dataIndex][3]],
+                                            [cols_selector, cols[item.seriesIndex][3]]];
+                            }
+                            catch(e) {
+                                return;
+                            }
+                            var page = pt._updateURL(filter_url, filter);
+                            window.open(page, '_blank');
                         }
-                        catch(e) {
-                            return;
-                        }
-                        var page = pt._updateURL(filter_url, filter);
-                        window.open(page, '_blank');
-                    }
-                });
+                    });
+                }
             }
         },
 
@@ -894,39 +921,65 @@
         },
 
         _updateURL: function(url, filters) {
-            // Update a URL with new filters
+            // Update a URL with both Ajax- and axis-filters
 
             // Construct the URL
-            var url_parts = url.split('?'), query = {};
+            var url_parts,
+                url_vars,
+                queries = [],
+                update = {},
+                seen = {},
+                i, f, q, k;
 
+            // Add axis filters
+            if (filters) {
+                for (i=0, len=filters.length; i<len; i++) {
+                    f = filters[i];
+                    k = f[0];
+                    update[k] = true;
+                    queries.push(k + '=' + f[1]);
+                }
+            }
+
+            // Add filters from ajaxURL
+            var ajaxURL = this.options.ajaxURL;
+            url_parts = ajaxURL.split('?');
             if (url_parts.length > 1) {
-                var qstr = url_parts[1];
+                url_vars = url_parts[1].split('&');
+                var seen = {};
+                for (i=0, len=url_vars.length; i < len; i++) {
+                    q = url_vars[i].split('=');
+                    if (q.length > 1) {
+                        k = decodeURIComponent(q[0]);
+                        if (!update[k]) {
+                            queries.push(k + '=' + decodeURIComponent(q[1]));
+                            seen[k] = true;
+                        }
+                    }
+                }
+                for (k in seen) {
+                    update[k] = true;
+                }
+            }
 
-                var a = qstr.split('&'),
-                b, v, i, len;
-                for (i=0, len=a.length; i < len; i++) {
-                    b = a[i].split('=');
-                    if (b.length > 1) {
-                        query[decodeURIComponent(b[0])] = decodeURIComponent(b[1]);
+            // Extract all original filters
+            url_parts = url.split('?');
+            if (url_parts.length > 1) {
+                url_vars = url_parts[1].split('&');
+                var seen = {};
+                for (i=0, len=url_vars.length; i < len; i++) {
+                    q = url_vars[i].split('=');
+                    if (q.length > 1) {
+                        k = decodeURIComponent(q[0]);
+                        if (!update[k]) {
+                            queries.push(k + '=' + decodeURIComponent(q[1]));
+                        }
                     }
                 }
             }
 
-            if (filters) {
-                for (option in filters) {
-                    newopt = filters[option];
-                    query[option] = newopt ? newopt : null;
-                }
-            }
-
-            var url_queries = [], url_query;
-            for (option in query) {
-                if (query[option] !== null) {
-                    url_queries.push(option + '=' + query[option]);
-                }
-            }
-            url_query = url_queries.join('&');
-            
+            // Update URL
+            var url_query = queries.join('&');
             var filtered_url = url_parts[0];
             if (url_query) {
                 filtered_url = filtered_url + '?' + url_query;
@@ -942,7 +995,7 @@
             // Construct the URL
             var url_parts = ajaxURL.split('?'),
                 url_query = null,
-                query = [];
+                query = [],
                 needs_reload = false;
 
             var qstr, url_vars;
@@ -1070,6 +1123,7 @@
             if (needs_reload || force) {
                 var ajaxURL = this.options.ajaxURL;
                 $(el).find('.pt-throbber').show();
+                $(el).find('.pt-empty').hide();
                 $.ajax({
                     'url': ajaxURL,
                     'dataType': 'json'
@@ -1122,6 +1176,7 @@
                 $(this).hide();
             });
 
+            // Totals-option doesn't need Ajax-refresh
             $('#' + widget_id + '-totals').click(function() {
                 var show_totals = $(this).is(':checked');
                 if (pt.options.showTotals != show_totals) {
@@ -1129,12 +1184,42 @@
                 }
             });
             
-            // Submit
-            $(el).find('input.pt-submit').click(function() {
-                var options = pt._getOptions(),
-                    filters = pt._getFilters();
-                pt.reload(options, filters, false);
+            // Axis selectors to fire optionChanged-event
+            $('#' + widget_id + '-rows, #' +
+                    widget_id + '-cols, #' +
+                    widget_id + '-fact').on('change.autosubmit', function() {
+                $(el).find('.pt-form').trigger('optionChanged');
             });
+
+            // Form submission
+            if (this.options.autoSubmit) {
+                // Auto-submit
+                var timeout = this.options.autoSubmit;
+                $(el).find('.pt-form').on('optionChanged', function() {
+                    var that = $(this);
+                    if (that.data('noAutoSubmit')) {
+                        // Event temporarily disabled
+                        return;
+                    }
+                    var timer = that.data('autoSubmitTimeout');
+                    if (timer) {
+                        clearTimeout(timer);
+                    }
+                    timer = setTimeout(function () {
+                        var options = pt._getOptions(),
+                            filters = pt._getFilters();
+                        pt.reload(options, filters, false);
+                    }, timeout);
+                    that.data('autoSubmitTimeout', timer);
+                });
+            } else {
+                // Manual submit
+                $(el).find('input.pt-submit').click(function() {
+                    var options = pt._getOptions(),
+                        filters = pt._getFilters();
+                    pt.reload(options, filters, false);
+                });
+            }
 
             // Zoom in
             $('#' + widget_id + ' div.pt-table div.pt-cell-zoom').click(function(event) {
@@ -1191,12 +1276,19 @@
             var el = this.element;
             var widget_id = $(el).attr('id');
 
-            $(el).find('input.pt-submit').unbind('click');
             $('#' + widget_id + ' div.pt-table div.pt-cell-zoom').unbind('click');
             $('#' + widget_id + '-options legend').unbind('click');
             $('#' + widget_id + '-filters legend').unbind('click');
-            $(widget_id + '-totals').unbind('click');
             
+            $(widget_id + '-totals').unbind('click');
+
+            $('#' + widget_id + '-rows, #' +
+                    widget_id + '-cols, #' +
+                    widget_id + '-fact').unbind('change.autosubmit');
+                    
+            $(el).find('.pt-form').unbind('optionChanged');
+            $(el).find('input.pt-submit').unbind('click');
+
             $('#' + widget_id + '-pchart-rows').unbind('click');
             $('#' + widget_id + '-vchart-rows').unbind('click');
             $('#' + widget_id + '-pchart-cols').unbind('click');

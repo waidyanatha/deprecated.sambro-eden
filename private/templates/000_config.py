@@ -52,6 +52,13 @@ settings.base.template = "default"
 # Set this to the Public URL of the instance
 #settings.base.public_url = "http://127.0.0.1:8000"
 
+# Uncomment to set pootle url
+# settings.L10n.pootle_url = "http://pootle.sahanafoundation.org/"
+
+# Uncomment to set pootle username and password
+# settings.L10n.pootle_username = "username"
+# settings.L10n.pootle_password = "*****"
+
 # Switch to "False" in Production for a Performance gain
 # (need to set to "True" again when Table definitions are changed)
 settings.base.migrate = True
@@ -167,8 +174,7 @@ settings.frontpage.rss = [
 #settings.ui.update_label = "Edit"
 
 # Audit settings
-# We Audit if either the Global or Module asks us to
-# (ignore gracefully if module author hasn't implemented this)
+# - can be a callable for custom hooks (return True to also perform normal logging, or False otherwise)
 # NB Auditing (especially Reads) slows system down & consumes diskspace
 #settings.security.audit_write = False
 #settings.security.audit_read = False

@@ -21,7 +21,7 @@ OpenLayers.Util.onImageLoadErrorColor = 'transparent';
 OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
 
 // Module pattern to hide internal vars
-(function () {
+(function() {
 
     // Module scope
     var format_geojson = new OpenLayers.Format.GeoJSON();
@@ -62,7 +62,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         var projection_current = new OpenLayers.Projection('EPSG:' + projection);
         options.projection_current = projection_current;
         if (projection == 900913) {
-            options.maxExtent = new OpenLayers.Bounds(-20037508, -20037508, 20037508, 20037508.34);
+            options.maxExtent = new OpenLayers.Bounds(-20037508.34, -20037508.34, 20037508.34, 20037508.34);
             options.maxResolution = 156543.0339;
             options.units = 'm';
         } else if (projection == 4326) {
@@ -84,22 +84,17 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
             center.transform(proj4326, projection_current);
         } else {
             // BBOX
-            var bbox = options.bbox;
-            var bottom_left = new OpenLayers.LonLat(bbox[0], bbox[1]);
-            bottom_left.transform(proj4326, projection_current);
-            var left = bottom_left.lon;
-            var bottom = bottom_left.lat;
-            var top_right = new OpenLayers.LonLat(bbox[2], bbox[3]);
-            top_right.transform(proj4326, projection_current);
-            var right = top_right.lon;
-            var top = top_right.lat;
-            bounds = OpenLayers.Bounds.fromArray([left, bottom, right, top]);
+            bounds = OpenLayers.Bounds.fromArray(options.bbox)
+                                      .transform(proj4326, projection_current);
             var center = bounds.getCenterLonLat();
         }
         options.center = center;
 
         // Build the OpenLayers map
         var map = addMap(map_id, options);
+
+        // Allow more room for Features
+        map.Z_INDEX_BASE.Popup = 800;
 
         // Add the GeoExt UI
         // @ToDo: Make this optional
@@ -128,8 +123,38 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         // Zoom Out to Cluster
         //layer.map.zoomTo(0)
         if (bounds) {
+            // Ensure a minimal BBOX in case we just have a single data point
+            var min_size = 0.05;
+            // Convert to 4326 for standard numbers
+            var map = layer.map;
+            var current_projection = map.getProjectionObject();
+            bounds.transform(current_projection, proj4326);
+            var bbox = bounds.toArray();
+            var lon_min = bbox[0],
+                lat_min = bbox[1],
+                lon_max = bbox[2],
+                lat_max = bbox[3];
+            var delta = (min_size - (lon_max - lon_min)) / 2;
+            if (delta > 0) {
+                lon_min -= delta;
+                lon_max += delta;
+            }
+            delta = (min_size - (lat_max - lat_min)) / 2;
+            if (delta > 0) {
+                lat_min -= delta;
+                lat_max += delta;
+            }
+            // Add an Inset in order to not have points right at the edges of the map
+            var inset = 0.007;
+            lon_min -= inset;
+            lon_max += inset;
+            lat_min -= inset;
+            lat_max += inset;
+            bounds = new OpenLayers.Bounds(lon_min, lat_min, lon_max, lat_max);
+            // Convert back to Map projection
+            bounds.transform(proj4326, current_projection);
             // Zoom to Bounds
-            layer.map.zoomToExtent(bounds);
+            map.zoomToExtent(bounds);
         }
         var strategy,
             strategies = layer.strategies;
@@ -257,20 +282,6 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
             this.s3.plugins.push(plugin);
         }
 
-        map.showThrobber = function(id) {
-            // @ToDo: Allow separate throbbers / map
-            $('.layer_throbber').show().removeClass('hide');
-            this.s3.layers_loading.pop(id); // we never want 2 pushed
-            this.s3.layers_loading.push(id);
-        }
-
-        map.hideThrobber = function(id) {
-            this.s3.layers_loading.pop(id);
-            if (this.s3.layers_loading.length === 0) {
-                $('.layer_throbber').hide().addClass('hide');
-            }
-        }
-
         // Layers
         addLayers(map);
 
@@ -383,6 +394,14 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
             addMapPanel(map);
         }
 
+        // Trigger a layout update on the westPanelContainer
+        // - this fixes up layout if the layerTree has scrollbars initially
+        var westPanelContainer = s3.westPanelContainer;
+        westPanelContainer.fireEvent('collapse');
+        window.setTimeout(function() {
+            westPanelContainer.fireEvent('expand')
+        }, 300);
+
         // Disable throbber when unchecked
         layerTree.root.eachChild( function() {
             // no layers at top-level, so recurse inside
@@ -391,7 +410,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
                     this.on('checkchange', function(event, checked) {
                         if (!checked) {
                             // Cancel any associated throbber
-                            map.hideThrobber(this.layer.s3_layer_id);
+                            hideThrobber(this.layer);
                         }
                     });
                 } else {
@@ -401,7 +420,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
                             this.on('checkchange', function(event, checked) {
                                 if (!checked) {
                                     // Cancel any associated throbber
-                                    map.hideThrobber(this.layer.s3_layer_id);
+                                    hideThrobber(this.layer);
                                 }
                             });
                         }
@@ -497,7 +516,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         var west_collapsed = s3.options.west_collapsed || false;
 
         var mapWestPanel = new Ext.Panel({
-            //cls: 'map_tools',
+            //cls: 'gis_west',
             header: false,
             border: false,
             split: true,
@@ -512,6 +531,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         }
 
         var westPanelContainer = new Ext.Panel({
+            cls: 'gis_west',
             region: 'west',
             //header: true,
             header: false, // Can't collapse Panel if this is hidden unless we create custom control
@@ -571,6 +591,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
             if (options.save) {
                 addSavePanel(map);
             }
+            addThrobber(map);
         }
 
         var mapPanelContainer = new Ext.Panel({
@@ -611,6 +632,68 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
     // Add LayerTree (to be called after the layers are added)
     var addLayerTree = function(map) {
 
+        // Extend LayerNodeUI to not force a folder with Radio buttons to have one active
+        // - so opening folder doesn't open first layer
+        // - so we can deselect a layer
+        GeoExt.tree.LayerNodeUIS3 = Ext.extend(GeoExt.tree.LayerNodeUI, {
+            onClick: function(e) {
+                if (e.getTarget('.x-tree-node-cb', 1)) {
+                    var node = this.node;
+                    var attributes = this.node.attributes;
+                    var group = attributes.checkedGroup;
+                    if (group && group !== 'baselayer') {
+                        // Radio button folders need different behaviour
+                        var checked = !attributes.checked;
+                        attributes.checked = checked;
+                        node.ui.checkbox.checked = checked;
+                        node.layer.setVisibility(checked);
+                        this.enforceOneVisible();
+                    } else {
+                        // Normal behaviour for Checkbox folders & Base Layers folder
+                        this.toggleCheck(this.isChecked());
+                    }
+                } else {
+                    GeoExt.tree.LayerNodeUI.superclass.onClick.apply(this, arguments);
+                }
+            },
+            enforceOneVisible: function() {
+                var attributes = this.node.attributes;
+                var group = attributes.checkedGroup;
+                // If we are in the baselayer group, the map will take care of
+                // enforcing visibility.
+                if (group && group !== 'baselayer') {
+                    var layer = this.node.layer;
+                    var checkedNodes = this.node.getOwnerTree().getChecked();
+                    //var checkedCount = 0;
+                    // enforce "not more than one visible"
+                    Ext.each(checkedNodes, function(n){
+                        var l = n.layer;
+                        if (!n.hidden && n.attributes.checkedGroup === group) {
+                            //checkedCount++;
+                            if (l != layer && attributes.checked) {
+                                l.setVisibility(false);
+                            }
+                        }
+                    });
+                    /*if (!emptyok) {
+                        // enforce "at least one visible"
+                        if(checkedCount === 0 && attributes.checked == false) {
+                            layer.setVisibility(true);
+                        }
+                    }*/
+                }
+            }
+        });
+
+        // Extend LayerNode to use our new LayerNodeUIS3
+        GeoExt.tree.LayerNodeS3 = Ext.extend(GeoExt.tree.LayerNode, {
+            constructor: function(config) {
+                this.defaultUI = GeoExt.tree.LayerNodeUIS3;
+                GeoExt.tree.LayerNodeS3.superclass.constructor.apply(this, arguments);
+            }
+        });
+        Ext.tree.TreePanel.nodeTypes.gx_layer = GeoExt.tree.LayerNodeS3;
+
         var s3 = map.s3;
         var options = s3.options;
         if (options.hide_base) {
@@ -647,27 +730,36 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         var leaf_listeners = {
             click: function(node) {
                 // Provide a bigger click target area, by allowing click on layer name as well as checkbox/radio
-                if (node.attributes.checked) {
-                    node.ui.checkbox.checked = false;
-                    node.fireEvent('checkchange', node);
+                var attributes = node.attributes;
+                if (attributes.checkedGroup == 'baselayer') {
+                    // Base Layer - allow normal behaviour
+                    node.ui.toggleCheck(!node.ui.isChecked())
                 } else {
-                    // Can't simply do this as otherwise it refires the Event with the checkbox changed!
-                    //node.ui.toggleCheck();
-                    node.ui.checkbox.checked = true;
-                    node.layer.setVisibility(true);
+                    // Overlay
+                    var checked = !attributes.checked;
+                    attributes.checked = checked;
+                    node.ui.checkbox.checked = checked;
+                    node.layer.setVisibility(checked);
                 }
             }
         };
 
-        // @ToDo: Run this when clicking on + as well as title
+        var updateLayout = function() {
+            // Trigger a layout update on the westPanelContainer
+            var westPanelContainer = s3.westPanelContainer;
+            westPanelContainer.fireEvent('collapse');
+            window.setTimeout(function() {
+                westPanelContainer.fireEvent('expand')
+            }, 300);
+        };
         var folder_listeners = {
-            click: function(node) {
+            collapse: function(node) {
                 // Trigger a layout update on the westPanelContainer
-                var westPanelContainer = s3.westPanelContainer;
-                westPanelContainer.fireEvent('collapse');
-                window.setTimeout(function() {
-                    westPanelContainer.fireEvent('expand')
-                }, 300);
+                updateLayout()
+            },
+            expand: function(node) {
+                // Trigger a layout update on the westPanelContainer
+                updateLayout()
             }
         };
 
@@ -722,36 +814,166 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         }
 
         // User-specified Folders
-        var dirs = map.s3.dirs;
-        var baseAttrs, child, folder;
-        for (var i = 0; i < dirs.length; i++) {
-            folder = dirs[i];
-            baseAttrs = {
-                listeners: leaf_listeners
+        var dirs = map.s3.dirs // A simple Array of folder names: []
+        var len = dirs.length;
+        if (len) {
+            // Extend GeoExt to support sub-folders
+            GeoExt.tree.LayerLoaderS3 = function(config) {
+                Ext.apply(this, config);
+                GeoExt.tree.LayerLoaderS3.superclass.constructor.call(this);
+            };
+            Ext.extend(GeoExt.tree.LayerLoaderS3, GeoExt.tree.LayerLoader, {
+                load: function(node, callback) {
+                    if (this.fireEvent('beforeload', this, node)) {
+                        this.removeStoreHandlers();
+                        // Clear all current children
+                        while (node.firstChild) {
+                            node.removeChild(node.firstChild);
+                        }
+
+                        if (!this.uiProviders) {
+                            this.uiProviders = node.getOwnerTree().getLoader().uiProviders;
+                        }
+
+                        // Add Layers
+                        if (!this.store) {
+                            this.store = GeoExt.MapPanel.guess().layers;
+                        }
+                        this.store.each(function(record) {
+                            this.addLayerNode(node, record);
+                        }, this);
+                        this.addStoreHandlers(node);
+
+                        // Add Folders
+                        var children = node.attributes.children;
+                        var len = children.length;
+                        if (len) {
+                            var child,
+                                dir,
+                                sibling;
+                            for (var i=0; i < len; i++) {
+                                dir = children[i];
+                                //child = this.createNode(dir); // Adds baseAttrs which we don't want
+                                child = new Ext.tree.TreePanel.nodeTypes[dir.nodeType](dir)
+                                sibling = node.item(0);
+                                if (sibling) {
+                                    node.insertBefore(child, sibling);
+                                } else {
+                                    node.appendChild(child);
+                                }
+                            }
+                        }
+
+                        if (typeof callback == 'function') {
+                            callback();
+                        }
+
+                        this.fireEvent('load', this, node);
+                    }
+                }
+            });
+
+            var baseAttrs,
+                child,
+                children,
+                dir,
+                _dir,
+                _dirs,
+                _dirslength,
+                folder,
+                folders = {},
+                _folders,
+                i,
+                j,
+                loader,
+                parent,
+                sub;
+            // Place folders into subfolders
+            for (i = 0; i < len; i++) {
+                dir = dirs[i];
+                _dirs = dir.split('/');
+                _dirslength = _dirs.length;
+                for (j = 0; j < _dirslength; j++) {
+                    if (j == 0) {
+                        // Top level
+                        _folders = folders;
+                    } else {
+                        parent = folder;
+                        _folders = _folders[parent];
+                    }
+                    folder = _dirs[j];
+                    if (!_folders.hasOwnProperty(folder)) {
+                        // Not yet in Hash, so add it
+                        _folders[folder] = {};
+                    }
+                }
             }
-            // @ToDo: Allow per-folder configuration
-            if (folders_radio) {
-                baseAttrs['checkedGroup'] = dirs[i];
-            }
-            child = {
-                text: dirs[i],
-                nodeType: 'gx_layercontainer',
-                layerStore: layerStore,
-                loader: {
+            for (dir in folders) {
+                _dir = folders[dir];
+                children = []
+                // @ToDo: Recursive (currently just 1 layer)
+                for (sub in _dir) {
+                    baseAttrs = {
+                        listeners: leaf_listeners
+                    }
+                    // @ToDo: Allow per-folder configuration
+                    if (folders_radio) {
+                        // @ToDo: Don't assume all folders have unique names
+                        baseAttrs['checkedGroup'] = sub;
+                    }
+                    loader = new GeoExt.tree.LayerLoaderS3({
+                        baseAttrs: baseAttrs,
+                        filter: (function(dir, sub) {
+                            return function(read) {
+                                if (read.data.layer.dir !== 'undefined')
+                                    return read.data.layer.dir === dir + '/' + sub;
+                            };
+                        })(dir, sub)
+                    });
+                    child = {
+                        text: sub,
+                        nodeType: 'gx_layercontainer',
+                        layerStore: layerStore,
+                        // @ToDo: Sub-folders
+                        children: [],
+                        loader: loader,
+                        leaf: false,
+                        listeners: folder_listeners,
+                        singleClickExpand: true,
+                        expanded: expanded
+                    };
+                    children.push(child);
+                }
+                baseAttrs = {
+                    listeners: leaf_listeners
+                }
+                // @ToDo: Allow per-folder configuration
+                if (folders_radio) {
+                    // @ToDo: Don't assume all folders have unique names
+                    baseAttrs['checkedGroup'] = dir;
+                }
+                loader = new GeoExt.tree.LayerLoaderS3({
                     baseAttrs: baseAttrs,
-                    filter: (function(folder) {
+                    filter: (function(dir) {
                         return function(read) {
                             if (read.data.layer.dir !== 'undefined')
-                                return read.data.layer.dir === folder;
+                                return read.data.layer.dir === dir;
                         };
-                    })(folder)
-                },
-                leaf: false,
-                listeners: folder_listeners,
-                singleClickExpand: true,
-                expanded: expanded
-            };
-            nodesArr.push(child);
+                    })(dir)
+                });
+                child = {
+                    text: dir,
+                    nodeType: 'gx_layercontainer',
+                    layerStore: layerStore,
+                    children: children,
+                    loader: loader,
+                    leaf: false,
+                    listeners: folder_listeners,
+                    singleClickExpand: true,
+                    expanded: expanded
+                };
+                nodesArr.push(child);
+            }
         }
 
         var treeRoot = new Ext.tree.AsyncTreeNode({
@@ -759,20 +981,22 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
             children: nodesArr
         });
 
-        var tbar;
         if (i18n.gis_properties || i18n.gis_uploadlayer) {
-            tbar = new Ext.Toolbar();
+            var tbar = new Ext.Toolbar();
         } else {
-            tbar = null;
+            var tbar = null;
         }
 
         var layerTree = new Ext.tree.TreePanel({
+            //cls: 'gis_layer_tree',
+            //height: options.map_height,
             title: i18n.gis_layers,
-            loader: new Ext.tree.TreeLoader({applyLoader: false}),
+            loaderloader: new Ext.tree.TreeLoader({applyLoader: false}),
             root: treeRoot,
             rootVisible: false,
             split: true,
-            autoScroll: true,
+            //autoScroll: true,
+            //containerScroll: true,
             collapsible: collapsible,
             collapseMode: 'mini',
             lines: false,
@@ -781,7 +1005,16 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         });
         new Ext.tree.TreeSorter(layerTree, {
             sortType: function(value, node) {
-                return node.text;
+                if (node.attributes.nodeType == 'gx_baselayercontainer') {
+                    // Base layers always first
+                    return ' ';
+                } else if (node.attributes.nodeType == 'gx_overlaylayercontainer') {
+                    // Default Overlays always second
+                    return '!';
+                } else {
+                    // Alpha-sort the rest
+                    return node.text;
+                }
             }
         });
 
@@ -843,6 +1076,44 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
     /* Layers */
 
     // @ToDo: Rewrite with layers as inheriting classes
+
+    /**
+     * Callback for all layers on 'loadstart'
+     * - show Throbber
+     */
+    var layer_loadstart = function(event) {
+        var layer = event.object;
+        var s3 = layer.map.s3;
+        $('#' + s3.id + ' .layer_throbber').show().removeClass('hide');
+        var layer_id = layer.s3_layer_id;
+        var layers_loading = s3.layers_loading;
+        layers_loading.pop(layer_id); // we never want 2 pushed
+        layers_loading.push(layer_id);
+    }
+
+    /**
+     * Callback for all layers on 'loadend'
+     * - cancel Throbber (unless other layers have a lock on it still)
+     */
+    var hideThrobber = function(layer) {
+        var s3 = layer.map.s3;
+        var layers_loading = s3.layers_loading;
+        layers_loading.pop(layer.s3_layer_id);
+        if (layers_loading.length === 0) {
+            $('#' + s3.id + ' .layer_throbber').hide().addClass('hide');
+        }
+    }
+    var layer_loadend = function(event) {
+        hideThrobber(event.object);
+    }
+
+    /**
+     * Callback for all layers on 'visibilitychanged'
+     * - show legendPanel if not displayed
+     */
+    var layer_visibilitychanged = function(event) {
+        showLegend(event.object.map);
+    }
 
     /**
      * Add Layers from the Catalogue
@@ -1070,7 +1341,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         }
         if (undefined != layer.dir) {
             var dir = layer.dir;
-            if ( $.inArray(dir, map.s3.dirs) == -1 ) {
+            if ($.inArray(dir, map.s3.dirs) == -1) {
                 // Add this folder to the list of folders
                 map.s3.dirs.push(dir);
             }
@@ -1363,12 +1634,9 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         geojsonLayer.events.on({
             'featureselected': onFeatureSelect,
             'featureunselected': onFeatureUnselect,
-            'loadstart': function(event) {
-                map.showThrobber(event.object.s3_layer_id);
-            },
-            'loadend': function(event) {
-                map.hideThrobber(event.object.s3_layer_id);
-            }
+            'loadstart': layer_loadstart,
+            'loadend': layer_loadend,
+            'visibilitychanged': layer_visibilitychanged  
         });
         map.addLayer(geojsonLayer);
         // Ensure Highlight & Popup Controls act on this layer
@@ -1566,7 +1834,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         }
         if (undefined != layer.dir) {
             var dir = layer.dir;
-            if ( $.inArray(dir, map.s3.dirs) == -1 ) {
+            if ($.inArray(dir, map.s3.dirs) == -1) {
                 // Add this folder to the list of folders
                 map.s3.dirs.push(dir);
             }
@@ -1639,12 +1907,9 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         gpxLayer.events.on({
             'featureselected': onFeatureSelect,
             'featureunselected': onFeatureUnselect,
-            'loadstart': function(event) {
-                map.showThrobber(event.object.s3_layer_id);
-            },
-            'loadend': function(event) {
-                map.hideThrobber(event.object.s3_layer_id);
-            }
+            'loadstart': layer_loadstart,
+            'loadend': layer_loadend,
+            'visibilitychanged': layer_visibilitychanged
         });
         map.addLayer(gpxLayer);
         // Ensure Highlight & Popup Controls act on this layer
@@ -1769,12 +2034,9 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         kmlLayer.events.on({
             'featureselected': onFeatureSelect,
             'featureunselected': onFeatureUnselect,
-            'loadstart': function(event) {
-                map.showThrobber(event.object.s3_layer_id);
-            },
-            'loadend': function(event) {
-                map.hideThrobber(event.object.s3_layer_id);
-            }
+            'loadstart': layer_loadstart,
+            'loadend': layer_loadend,
+            'visibilitychanged': layer_visibilitychanged
         });
         map.addLayer(kmlLayer);
         // Ensure Highlight & Popup Controls act on this layer
@@ -1799,7 +2061,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         }
         if (undefined != layer.dir) {
             var dir = layer.dir;
-            if ( $.inArray(dir, map.s3.dirs) == -1 ) {
+            if ($.inArray(dir, map.s3.dirs) == -1) {
                 // Add this folder to the list of folders
                 map.s3.dirs.push(dir);
             }
@@ -1879,12 +2141,9 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
             layer.events.on({
                 'featureselected': layer.onSelect,
                 'featureunselected': layer.onUnselect,
-                'loadstart': function(event) {
-                    map.showThrobber(event.object.s3_layer_id);
-                },
-                'loadend': function(event) {
-                    map.hideThrobber(event.object.s3_layer_id);
-                }
+                'loadstart': layer_loadstart,
+                'loadend': layer_loadend,
+                'visibilitychanged': layer_visibilitychanged
             });
             map.addLayer(layer);
             // Ensure Highlight & Popup Controls act on this layer
@@ -1903,12 +2162,9 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
             layer.events.on({
                 'featureselected': layer.onSelect,
                 'featureunselected': layer.onUnselect,
-                'loadstart': function(event) {
-                    map.showThrobber(event.object.s3_layer_id);
-                },
-                'loadend': function(event) {
-                    map.hideThrobber(event.object.s3_layer_id);
-                }
+                'loadstart': layer_loadstart,
+                'loadend': layer_loadend,
+                'visibilitychanged': layer_visibilitychanged
             });
             map.addLayer(layer);
             // Ensure Highlight & Popup Controls act on this layer
@@ -1934,7 +2190,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         }
         if (undefined != layer.dir) {
             var dir = layer.dir;
-            if ( $.inArray(dir, map.s3.dirs) == -1 ) {
+            if ($.inArray(dir, map.s3.dirs) == -1) {
                 // Add this folder to the list of folders
                 map.s3.dirs.push(dir);
             }
@@ -2010,7 +2266,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         }
         if (undefined != layer.dir) {
             var dir = layer.dir;
-            if ( $.inArray(dir, map.s3.dirs) == -1 ) {
+            if ($.inArray(dir, map.s3.dirs) == -1) {
                 // Add this folder to the list of folders
                 map.s3.dirs.push(dir);
             }
@@ -2169,12 +2425,9 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         wfsLayer.events.on({
             'featureselected': onFeatureSelect,
             'featureunselected': onFeatureUnselect,
-            'loadstart': function(event) {
-                map.showThrobber(event.object.s3_layer_id);
-            },
-            'loadend': function(event) {
-                map.hideThrobber(event.object.s3_layer_id);
-            }
+            'loadstart': layer_loadstart,
+            'loadend': layer_loadend,
+            'visibilitychanged': layer_visibilitychanged
         });
         map.addLayer(wfsLayer);
         // Ensure Highlight & Popup Controls act on this layer
@@ -2198,7 +2451,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         }
         if (undefined != layer.dir) {
             var dir = layer.dir;
-            if ( $.inArray(dir, map.s3.dirs) == -1 ) {
+            if ($.inArray(dir, map.s3.dirs) == -1) {
                 // Add this folder to the list of folders
                 map.s3.dirs.push(dir);
             }
@@ -2365,6 +2618,11 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
             // This gets picked up after mapPanel instantiates & copied to it's layerRecords
             wmsLayer.legendURL = legendURL;
         }
+        wmsLayer.events.on({
+            'loadstart': layer_loadstart,
+            'loadend': layer_loadend,
+            'visibilitychanged': layer_visibilitychanged
+        });
         map.addLayer(wmsLayer);
         if (layer._base) {
             map.setBaseLayer(wmsLayer);
@@ -2389,7 +2647,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         }
         if (undefined != layer.dir) {
             var dir = layer.dir;
-            if ( $.inArray(dir, map.s3.dirs) == -1 ) {
+            if ($.inArray(dir, map.s3.dirs) == -1) {
                 // Add this folder to the list of folders
                 map.s3.dirs.push(dir);
             }
@@ -2441,7 +2699,11 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         // The default controls (normally added in OpenLayers.Map, but brought here for greater control)
         // Navigation or TouchNavigation depending on what is in build
         //if (OpenLayers.Control.Navigation) {
-            map.addControl(new OpenLayers.Control.Navigation());
+            var navControl = new OpenLayers.Control.Navigation();
+            if (options.no_zoom_wheel) {
+                navControl.zoomWheelEnabled = false;
+            }
+            map.addControl(navControl);
         //} else if (OpenLayers.Control.TouchNavigation) {
         //    map.addControl(new OpenLayers.Control.TouchNavigation());
         //}
@@ -2491,6 +2753,20 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
 
     /* Popups */
     var addPopupControls = function(map) {
+
+        // Could also use static/themes/Vulnerability/js/FeatureDoubleClick.js
+        OpenLayers.Handler.FeatureS3 = OpenLayers.Class(OpenLayers.Handler.Feature, {
+            dblclick: function(evt) {
+                // Propagate Event to ensure we still zoom (not working)
+                //return !this.handle(evt);
+                //return true;
+                // Ensure that we still Zoom
+                this.map.zoomTo(this.map.zoom + 1, evt.xy);
+                return false;
+            },
+            CLASS_NAME: 'OpenLayers.Handler.FeatureS3'
+        });
+
         var layers_all = map.s3.layers_all;
         // onClick Popup
         var popupControl = new OpenLayers.Control.SelectFeature(
@@ -2499,6 +2775,9 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
                 //multiple: true
             }
         );
+        popupControl.handlers.feature = new OpenLayers.Handler.FeatureS3(popupControl, popupControl.layer, popupControl.callbacks, {
+            geometryTypes: popupControl.geometryTypes
+        });
         // onHover Tooltip
         var highlightControl = new OpenLayers.Control.SelectFeature(
             layers_all, {
@@ -3480,7 +3759,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
     // Legend Panel as floating DIV
     var addLegendPanel = function(map, legendPanel) {
         var map_id = map.s3.id;
-        var div = '<div class="map_legend_panel"></div>';
+        var div = '<div class="map_legend_div"><div class="map_legend_tab right"></div><div class="map_legend_panel"></div></div>';
         $('#' + map_id).append(div);
         var legendPanel = new GeoExt.LegendPanel({
             title: i18n.gis_legend,
@@ -3492,6 +3771,32 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         var jquery_obj = $('#' + map_id + ' .map_legend_panel');
         var el = Ext.get(jquery_obj[0]);
         legendPanel.render(el);
+
+        // Show/Hide Legend when clicking on Tab 
+        $('#' + map_id + ' .map_legend_tab').click(function() {
+            if ($(this).hasClass('right')) {
+                hideLegend(map);
+            } else {
+                showLegend(map);
+            }
+        });
+    }
+    var hideLegend = function(map) {
+        var map_id = map.s3.id;
+        var outerWidth = $('#' + map_id + ' .map_legend_panel').outerWidth();
+        $('#' + map_id + ' .map_legend_div').animate({
+            marginRight: '-' + outerWidth + 'px'
+        });
+        $('#' + map_id + ' .map_legend_tab').removeClass('right')
+                                            .addClass('left');
+    }
+    var showLegend = function(map) {
+        var map_id = map.s3.id;
+        $('#' + map_id + ' .map_legend_div').animate({
+            marginRight: 0
+        });
+        $('#' + map_id + ' .map_legend_tab').removeClass('left')
+                                            .addClass('right');
     }
 
     // Navigation History
@@ -3697,6 +4002,24 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
         toolbar.addButton(saveButton);
     }
 
+    // Save throbber as floating DIV to see when map layers are loading
+    var addThrobber = function(map) {
+        var s3 = map.s3;
+        var map_id = s3.id;
+        if ($('#' + map_id + ' .layer_throbber').length) {
+            // We already have a Throbber
+            // (this happens when switching between full-screen & embedded)
+            return;
+        }
+        var div = '<div class="layer_throbber float hide';
+        if (s3.options.save) {
+            // Add save class so that we know to push throbber down below save button
+            div += ' save';
+        }
+        div += '"></div>';
+        $('#' + map_id).append(div);
+    }
+    
     // Save button as floating DIV to save the Viewport settings
     var addSavePanel = function(map) {
         var s3 = map.s3;
@@ -3713,7 +4036,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
             name_display += config_name;
         }
         name_display += '</div></div>';
-        var div = '<div class="map_save_panel off">' + name_display + '<div class="map_save_button"><div class="map_save_label">' + i18n.gis_save_map + '</div></div></div>';
+        var div = '<div class="map_save_panel off">' + name_display + '<div class="btn map_save_button"><div class="map_save_label">' + i18n.gis_save_map + '</div></div></div>';
         $('#' + map_id).append(div);
         if (config_name) {
             $('#' + map_id + ' .map_save_panel').removeClass('off');
@@ -3777,7 +4100,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
             options.config_name = name;
             if (options.pe_id) {
                 // Normal user
-                var pe_url = '/?~.pe_id=' + options.pe_id;
+                var pe_url = '?~.pe_id__belongs=' + options.pe_id;
             } else {
                 // Map Admin
                 var pe_url = '';
@@ -4292,12 +4615,13 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
             image.width = w;
         };
 
+        /* Disabled as causing problems with variable markers
         if (marker_url) {
             // Pre-cache this image
             var image = new Image();
             image.onload = scaleImage;
             image.src = marker_url;
-        }
+        }*/
 
         // Feature Styles based on either a common JSON style or per-Feature attributes (Queries)
         // - also used as fallback (e.g. Cluster) for Rules-based Styles
@@ -4911,7 +5235,7 @@ OpenLayers.ProxyHost = S3.Ap.concat('/gis/proxy?url=');
                 if (undefined != elem.fillOpacity) {
                     fillOpacity = elem.fillOpacity;
                 } else {
-                    fillOpacity = 1;
+                    fillOpacity = opacity;
                 }
                 if (undefined != elem.strokeOpacity) {
                     strokeOpacity = elem.strokeOpacity;

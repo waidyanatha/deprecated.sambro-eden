@@ -27,6 +27,8 @@
     OTHER DEALINGS IN THE SOFTWARE.
 """
 
+from __future__ import division
+
 __all__ = ["S3LocationModel",
            "S3LocationNameModel",
            "S3LocationTagModel",
@@ -801,6 +803,16 @@ class S3LocationModel(S3Model):
         else:
             children = None
 
+        if "level" in _vars and _vars.level:
+            if _vars.level == "null":
+                level = None
+            elif "|" in _vars.level:
+                level = _vars.level.split("|")
+            else:
+                level = str.upper(_vars.level)
+        else:
+            level = None
+
         if children:
             # LocationSelector
             children = current.gis.get_children(children, level=level)
@@ -825,16 +837,6 @@ class S3LocationModel(S3Model):
                 fields.append(table.level)
                 fields.append(table.parent)
         resource.add_filter(query)
-
-        if "level" in _vars and _vars.level:
-            if _vars.level == "null":
-                level = None
-            elif "|" in _vars.level:
-                level = _vars.level.split("|")
-            else:
-                level = str.upper(_vars.level)
-        else:
-            level = None
 
         if level:
             # LocationSelector or Autocomplete
@@ -3452,7 +3454,7 @@ class S3MapModel(S3Model):
                              Field("version",
                                    label=T("Version"),
                                    default="1.1.0",
-                                   requires=IS_IN_SET(["1.0.0", "1.1.0"],
+                                   requires=IS_IN_SET(["1.0.0", "1.1.0", "2.0.0"],
                                                       zero=None)),
                              gis_layer_folder()(),
                              gis_refresh()(default=0), # Default to Off as 'External Source' which is uneditable
@@ -4096,6 +4098,7 @@ class S3GISThemeModel(S3Model):
                              Field("date", "datetime",
                                    label = T("Date")),
                              gis_layer_folder()(),
+                             gis_opacity()(),
                              # Avoid clustering
                              cluster_distance()(default = 1),
                              cluster_threshold()(),
@@ -4120,13 +4123,20 @@ class S3GISThemeModel(S3Model):
         # Theme Data
         add_component("gis_theme_data", gis_layer_theme="layer_theme_id")
 
+        represent = S3Represent(lookup=tablename)
         layer_theme_id = S3ReusableField("layer_theme_id", table,
                                          label = "Theme Layer",
                                          requires = IS_ONE_OF(db,
                                                               "gis_layer_theme.id",
-                                                              "%(name)s"),
-                                         represent = self.theme_represent,
+                                                              represent
+                                                              ),
+                                         represent = represent,
                                          ondelete = "CASCADE")
+
+        # Custom Method to generate a style
+        self.set_method("gis", "layer_theme",
+                        method="style",
+                        action=self.gis_theme_style)
 
         # =====================================================================
         # GIS Theme Data
@@ -4170,21 +4180,55 @@ class S3GISThemeModel(S3Model):
 
     # ---------------------------------------------------------------------
     @staticmethod
-    def theme_represent(id):
+    def gis_theme_style(r, **attr):
         """
+            Custom method to create a Style for a Theme Layer
+            - splits data into 5 quintiles
+            - uses Colorbrewer to create a 5-class colorblind-safe printer-friendly Sequential scheme
+
+            @ToDo: Divergent colour scheme option
+            @ToDo: Select # of classes
+            @ToDo: Select full range of colour schemes
+            @ToDo: Alternate class breaks mechanisms (pretty breaks, etc)
         """
 
-        if not id:
-            return current.messages["NONE"]
+        classes = 5
+        nature = "sequential"
+
         db = current.db
-        table = db.gis_layer_theme
-        query = (table.id == id)
-        theme = db(query).select(table.name,
-                                 limitby=(0, 1)).first()
-        try:
-            return theme.name
-        except:
-            return current.messages.UNKNOWN_OPT
+        table = db.gis_theme_data
+        rows = db(table.layer_theme_id == r.id).select(table.value)
+        values = [float(row.value) for row in rows]
+        q = []
+        qappend = q.append
+        for i in range(classes - 1):
+            qappend(1 / classes * (i + 1))
+        breaks = current.s3db.stats_quantile(values, q)
+        # Make mutable
+        breaks = list(breaks)
+        values_min = min(values)
+        values_max = max(values)
+        breaks.insert(0, values_min)
+        breaks.append(values_max)
+
+        if nature == "sequential":
+            # PuRd
+            colours = ["F1EEF6", "D7B5D8", "DF65B0", "DD1C77", "980043"]
+        elif nature == "divergent":
+            # BrBG
+            colours = ["A6611A", "DFC27D", "F5F5F5", "80CDC1", "018571"]
+
+        style = []
+        sappend = style.append
+        for i in range(classes):
+            element = {"low": breaks[i],
+                       "high": breaks[i + 1],
+                       "fill": colours[i]
+                       }
+            sappend(element)
+
+        current.response.headers["Content-Type"] = "application/json"
+        return json.dumps(style)
 
 # =============================================================================
 class S3POIFeedModel(S3Model):
@@ -4240,10 +4284,10 @@ def source_url_field():
 def gis_layer_folder():
     T = current.T
     FOLDER = T("Folder")
-    return S3ReusableField("dir", length=32,
+    return S3ReusableField("dir", length=64,
                            comment = DIV(_class="tooltip",
                                          _title="%s|%s" % (FOLDER,
-                                                           T("If you enter a foldername then the layer will appear in this folder in the Map's layer switcher."))),
+                                                           T("If you enter a foldername then the layer will appear in this folder in the Map's layer switcher. A sub-folder can be created by separating names with a '/'"))),
                            label = FOLDER)
 
 # =============================================================================
@@ -4420,14 +4464,16 @@ class gis_LocationRepresent(S3Represent):
     """ Representation of Locations """
 
     def __init__(self,
-                 show_link=False,
-                 multiple=False,
-                 sep=None
+                 show_link = False,
+                 multiple = False,
+                 sep = None,
+                 address_only = False
                  ):
 
         # Translation uses gis_location_name & not T()
         translate = current.deployment_settings.get_L10n_translate_gis_location() 
 
+        self.address_only = address_only
         self.sep = sep
 
         if sep:
@@ -4443,6 +4489,10 @@ class gis_LocationRepresent(S3Represent):
                       "L5",
                       ]
             self.multi_country = len(current.deployment_settings.get_gis_countries()) != 1
+        elif address_only:
+            fields = ["id",
+                      "addr_street",
+                      ]
         else:
             fields = ["id",
                       "name",
@@ -4535,10 +4585,21 @@ class gis_LocationRepresent(S3Represent):
             @param row: the gis_location Row
         """
 
+        if self.address_only:
+            if row.addr_street:
+                # Get the 1st line of the street address.
+                represent = row.addr_street.splitlines()[0]
+                return s3_unicode(represent)
+            else:
+                return current.messages["NONE"]
+
         sep = self.sep
         translate = self.translate
-        path = row.path
-        ids = path.split("/")
+        if sep or translate:
+            path = row.path
+            if not path:
+                path = current.gis.update_location_tree(row)
+            ids = path.split("/")
         if translate:
             language = current.session.s3.language
             if language == current.deployment_settings.get_L10n_default_language():
@@ -4622,54 +4683,53 @@ class gis_LocationRepresent(S3Represent):
             # @ToDo: Support translate=True
             if level == "L0":
                 represent = "%s (%s)" % (name, current.messages.COUNTRY)
-            else:
-                if level in ["L1", "L2", "L3", "L4", "L5"]:
-                    # Lookup the hierarchy for labels
-                    s3db = current.s3db
-                    htable = s3db.gis_hierarchy
-                    L0_name = row.L0
-                    if L0_name:
-                        path = path.split("/")
-                        L0_id = path[0]
-                        level_name = current.gis.get_location_hierarchy(level,
-                                                                        L0_id)
-                    else:
-                        # Fallback to system default
-                        level_name = current.gis.get_location_hierarchy(level)
-
-                    represent = name
-                    if level_name:
-                        represent = "%s (%s)" % (represent, level_name)
-                    if row.parent:
-                        parent_level = "L%s" % (int(level[1]) - 1)
-                        parent_name = row[parent_level]
-                        if parent_name:
-                            represent = "%s, %s" % (represent, parent_name)
+            elif level in ["L1", "L2", "L3", "L4", "L5"]:
+                # Lookup the hierarchy for labels
+                s3db = current.s3db
+                htable = s3db.gis_hierarchy
+                L0_name = row.L0
+                if L0_name:
+                    path = row.path.split("/")
+                    L0_id = path[0]
+                    level_name = current.gis.get_location_hierarchy(level,
+                                                                    L0_id)
                 else:
-                    # Specific location:
-                    # Don't duplicate the Resource Name
-                    # Street address or lat/lon as base
-                    represent = ""
-                    if row.addr_street:
-                        # Get the 1st line of the street address.
-                        represent = row.addr_street.splitlines()[0]
-                    if (not represent) and \
-                       (row.inherited == False) and \
-                       (row.lat is not None) and \
-                       (row.lon is not None):
-                        represent = self.lat_lon_represent(row)
-                    if row.parent:
-                        # @ToDo: Assumes no missing levels in PATH
-                        path = path.split("/")
-                        parent_level = "L%s" % (len(path) - 2)
-                        parent_name = row[parent_level]
-                        if parent_name:
-                            if represent:
-                                represent = "%s, %s" % (represent, parent_name)
-                            else:
-                                represent = parent_name
-                    if not represent:
-                        represent = name or row.id
+                    # Fallback to system default
+                    level_name = current.gis.get_location_hierarchy(level)
+
+                represent = name
+                if level_name:
+                    represent = "%s (%s)" % (represent, level_name)
+                if row.parent:
+                    parent_level = "L%s" % (int(level[1]) - 1)
+                    parent_name = row[parent_level]
+                    if parent_name:
+                        represent = "%s, %s" % (represent, parent_name)
+            else:
+                # Specific location:
+                # Don't duplicate the Resource Name
+                # Street address or lat/lon as base
+                represent = ""
+                if row.addr_street:
+                    # Get the 1st line of the street address.
+                    represent = row.addr_street.splitlines()[0]
+                if (not represent) and \
+                   (row.inherited == False) and \
+                   (row.lat is not None) and \
+                   (row.lon is not None):
+                    represent = self.lat_lon_represent(row)
+                if row.parent:
+                    # @ToDo: Assumes no missing levels in PATH
+                    path = row.path.split("/")
+                    parent_level = "L%s" % (len(path) - 2)
+                    parent_name = row[parent_level]
+                    if parent_name:
+                        if represent:
+                            represent = "%s, %s" % (represent, parent_name)
+                        else:
+                            represent = parent_name
+                if not represent:
+                    represent = name or row.id
 
         return s3_unicode(represent)
         
