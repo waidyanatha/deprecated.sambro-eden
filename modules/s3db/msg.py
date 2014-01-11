@@ -85,7 +85,9 @@ class S3MessagingModel(S3Model):
 
         message_types = Storage(msg_email = T("Email"),
                                 msg_rss_feed = T("RSS"),
+                                msg_sms_outbox = T("SMS OutBox"),
                                 msg_twilio_inbox = T("Twilio SMS InBox"),
+                                msg_twitter_outbox = T("Twitter OutBox"),
                                 )
 
         tablename = "msg_message"
@@ -133,9 +135,6 @@ class S3MessagingModel(S3Model):
         # Message parsing status
         #
 
-        # Components
-        #self.add_component("msg_parsing_status", msg_log="message_id")
-
         # Parsing status of all the messages
         tablename = "msg_parsing_status"
         table = define_table(tablename,
@@ -163,48 +162,57 @@ class S3MessagingModel(S3Model):
         # Outbound Messages
         # ---------------------------------------------------------------------
         # Show only the supported messaging methods
-        msg_contact_method_opts = current.msg.MSG_CONTACT_OPTS
+        MSG_CONTACT_OPTS = current.msg.MSG_CONTACT_OPTS
+        
+        # Maximum number of retries to send a message
+        MAX_SEND_RETRIES = current.deployment_settings.get_msg_max_send_retries()
 
         # Valid message outbox statuses
-        msg_status_type_opts = {1 : T("Unsent"),
-                                2 : T("Sent"),
-                                3 : T("Draft"),
-                                4 : T("Invalid"),
-                                }
+        MSG_STATUS_OPTS = {1 : T("Unsent"),
+                           2 : T("Sent"),
+                           3 : T("Draft"),
+                           4 : T("Invalid"),
+                           5 : T("Failed"),
+                          }
 
         opt_msg_status = S3ReusableField("status", "integer",
                                          notnull=True,
-                                         requires = IS_IN_SET(msg_status_type_opts,
+                                         requires = IS_IN_SET(MSG_STATUS_OPTS,
                                                               zero=None),
                                          default = 1,
                                          label = T("Status"),
                                          represent = lambda opt: \
-                                            msg_status_type_opts.get(opt, UNKNOWN_OPT))
+                                                     MSG_STATUS_OPTS.get(opt,
+                                                                 UNKNOWN_OPT))
 
-        # Components
-        #self.add_component("msg_outbox", msg_log="message_id")
-
-        # Outbox - needs to be separate to Message since a single message sent needs different outbox entries for each recipient
+        # Outbox - needs to be separate to Message since a single message
+        # sent needs different outbox entries for each recipient
         tablename = "msg_outbox"
         table = define_table(tablename,
                              message_id(),
-                             super_link("pe_id", "pr_pentity"), # Person/Group to send the message out to
-                             Field("address"),   # If set used instead of picking up from pe_id
+                             # Person/Group to send the message out to:
+                             super_link("pe_id", "pr_pentity"),
+                             # If set used instead of picking up from pe_id:
+                             Field("address"),   
                              Field("pr_message_method", length=32,
-                                   requires = IS_IN_SET(msg_contact_method_opts,
+                                   requires = IS_IN_SET(MSG_CONTACT_OPTS,
                                                         zero=None),
                                    default = "EMAIL",
                                    label = T("Contact Method"),
                                    represent = lambda opt: \
-                                        msg_contact_method_opts.get(opt, UNKNOWN_OPT)),
+                                               MSG_CONTACT_OPTS.get(opt,
+                                                            UNKNOWN_OPT)),
                              opt_msg_status(),
                              Field("system_generated", "boolean",
                                    default=False),
                              Field("log"),
+                             Field("retries", "integer",
+                                   default=MAX_SEND_RETRIES,
+                                   readable=False,
+                                   writable=False),
                              *s3_meta_fields())
 
         configure(tablename,
-                  super_entity = "pr_pentity",
                   orderby = ~table.created_on,
                   list_fields=["id",
                                "message_id",
@@ -255,7 +263,9 @@ class S3MessagingModel(S3Model):
             text = record.body
         except:
             return current.messages.UNKNOWN_OPT
-        if len(text) < 80:
+        if not text:
+            return ""
+        elif len(text) < 80:
             return text
         else:
             return "%s..." % text[:76]
@@ -317,7 +327,7 @@ class S3BaseStationModel(S3Model):
             msg_list_empty=T("No Base Stations currently registered"))
 
         self.configure(tablename,
-                       super_entity=("org_site"),
+                       super_entity = "org_site",
                        deduplicate = self.msg_basestation_duplicate,
                        )
 
@@ -680,9 +690,9 @@ class S3EmailInboundModel(S3ChannelModel):
                        )
 
         # ---------------------------------------------------------------------
-        # Email Inbox
+        # Email Log: InBox & Outbox
         #
-        sender = current.deployment_settings.mail.get("sender", None)
+        sender = current.deployment_settings.get_mail_sender()
 
         tablename = "msg_email"
         table = define_table(tablename,
@@ -1215,7 +1225,8 @@ class S3SMSOutboundModel(S3Model):
         - Tropo
     """
 
-    names = ["msg_sms_outbound_gateway",
+    names = ["msg_sms_outbox",
+             "msg_sms_outbound_gateway",
              "msg_sms_modem_channel",
              "msg_sms_webapi_channel",
              "msg_sms_smtp_channel",
@@ -1229,7 +1240,27 @@ class S3SMSOutboundModel(S3Model):
         define_table = self.define_table
 
         # ---------------------------------------------------------------------
+        # SMS Outbox
+        #
+        tablename = "msg_sms_outbox"
+        table = define_table(tablename,
+                             self.super_link("message_id", "msg_message"),
+                             Field("body", "text",
+                                   #label = T("Body")
+                                   ),
+                             #Field("from_address", notnull=True,
+                             #      default = sender,
+                             #      label = T("Sender"),
+                             #      ),
+                             *s3_meta_fields())
+
+        configure(tablename,
+                  super_entity = "msg_message",
+                  )
+
+        # ---------------------------------------------------------------------
         # SMS Outbound Gateway
+        # - select which gateway is in active use
         #
         tablename = "msg_sms_outbound_gateway"
         table = define_table(tablename,
@@ -1244,6 +1275,8 @@ class S3SMSOutboundModel(S3Model):
                              *s3_meta_fields())
 
         # ---------------------------------------------------------------------
+        # SMS Modem Channel
+        #
         tablename = "msg_sms_modem_channel"
         table = define_table(tablename,
                              self.super_link("channel_id", "msg_channel"),
@@ -1306,6 +1339,8 @@ class S3SMSOutboundModel(S3Model):
                   )
 
         # ---------------------------------------------------------------------
+        # SMS via SMTP Channel
+        #
         tablename = "msg_sms_smtp_channel"
         table = define_table(tablename,
                              self.super_link("channel_id", "msg_channel"),
@@ -1503,6 +1538,7 @@ class S3TwilioModel(S3ChannelModel):
 class S3TwitterModel(S3Model):
 
     names = ["msg_twitter_channel",
+             "msg_twitter_outbox",
              "msg_twitter_search",
              "msg_twitter_search_results",
              ]
@@ -1516,7 +1552,7 @@ class S3TwitterModel(S3Model):
         define_table = self.define_table
 
         # ---------------------------------------------------------------------
-        # Twitter Channels
+        # Twitter Channel
         #
         tablename = "msg_twitter_channel"
         table = define_table(tablename,
@@ -1535,6 +1571,25 @@ class S3TwitterModel(S3Model):
         configure(tablename,
                   super_entity = "msg_channel",
                   onvalidation = self.twitter_channel_onvalidation
+                  )
+
+        # ---------------------------------------------------------------------
+        # Twitter Outbox
+        #
+        tablename = "msg_twitter_outbox"
+        table = define_table(tablename,
+                             self.super_link("message_id", "msg_message"),
+                             Field("body", "text",
+                                   #label = T("Body")
+                                   ),
+                             #Field("from_address", notnull=True,
+                             #      default = sender,
+                             #      label = T("Sender"),
+                             #      ),
+                             *s3_meta_fields())
+
+        configure(tablename,
+                  super_entity = "msg_message",
                   )
 
         # ---------------------------------------------------------------------

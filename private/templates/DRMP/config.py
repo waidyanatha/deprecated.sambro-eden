@@ -17,9 +17,7 @@ from gluon.validators import IS_NULL_OR, IS_NOT_EMPTY
 from s3.s3fields import S3Represent
 from s3.s3resource import S3FieldSelector
 from s3.s3utils import S3DateTime, s3_auth_user_represent_name, s3_avatar_represent, s3_unicode
-from s3.s3validators import IS_INT_AMOUNT, IS_LOCATION_SELECTOR2, IS_ONE_OF
-from s3.s3widgets import S3LocationSelectorWidget2
-from s3.s3forms import S3SQLCustomForm, S3SQLInlineComponent, S3SQLInlineComponentCheckbox
+from s3.s3validators import IS_ONE_OF
 
 T = current.T
 s3 = current.response.s3
@@ -38,7 +36,7 @@ datetime_represent = lambda dt: S3DateTime.datetime_represent(dt, utc=True)
 settings.auth.registration_requires_approval = True
 settings.auth.registration_requires_verification = False
 settings.auth.registration_requests_organisation = True
-settings.auth.registration_organisation_required = True
+#settings.auth.registration_organisation_required = True
 settings.auth.registration_requests_site = False
 
 # Approval emails get sent to all admins
@@ -119,7 +117,7 @@ settings.L10n.languages = OrderedDict([
     ("tet", "Tetum"),
 ])
 # Default Language
-settings.L10n.default_language = "en"
+settings.L10n.default_language = "tet"
 # Default timezone for users
 settings.L10n.utc_offset = "UTC +0900"
 # Unsortable 'pretty' date format
@@ -1189,7 +1187,7 @@ def render_posts(listid, resource, rfields, record,
         for doc in documents:
             try:
                 doc_name = retrieve(doc)[0]
-            except IOError:
+            except (IOError, TypeError):
                 doc_name = current.messages["NONE"]
             doc_url = URL(c="default", f="download",
                           args=[doc])
@@ -1295,6 +1293,7 @@ def render_posts(listid, resource, rfields, record,
 
     return item
 
+# For access from custom controllers
 s3.render_posts = render_posts
 
 # -----------------------------------------------------------------------------
@@ -1455,13 +1454,6 @@ def render_profile_posts(listid, resource, rfields, record, **attr):
         tag = "small"
 
     item = DIV(DIV(DIV(avatar,
-                       P(SMALL(" ", author, " ",
-                               A(organisation,
-                                 _href=org_url,
-                                 _class="card-organisation",
-                                 ),
-                               ),
-                         _class="citation"),
                        _class="span1"),
                    DIV(SPAN(A(location,
                               _href=location_url,
@@ -1473,6 +1465,13 @@ def render_profile_posts(listid, resource, rfields, record, **attr):
                        edit_bar,
                        P(body,
                          _class="card_comments"),
+                         P(SMALL(" ", author, " ",
+                               A(organisation,
+                                 _href=org_url,
+                                 _class="card-organisation",
+                                 ),
+                               ),
+                         _class="citation"),
                        docs,
                        _class="span5 card-details"),
                    _class="row",
@@ -1605,6 +1604,7 @@ def render_projects(listid, resource, rfields, record, **attr):
         currencies = raw["project_donor_organisation.currency"]
         if not isinstance(currencies, list):
             currencies = [currencies for donor_id in donor_ids]
+        from s3.s3validators import IS_INT_AMOUNT
         amount_represent = IS_INT_AMOUNT.represent
         donors_list = []
         length = len(donor_ids)
@@ -1799,7 +1799,7 @@ def render_resources(listid, resource, rfields, record, **attr):
     date = record["org_resource.modified_on"]
     quantity = record["org_resource.value"]
     resource_type = record["org_resource.parameter_id"]
-    body = "%s %s" % (quantity, resource_type)
+    body = "%s %s" % (quantity, T(resource_type))
     comments = raw["org_resource.comments"]
     organisation = record["org_resource.organisation_id"]
     organisation_id = raw["org_resource.organisation_id"]
@@ -1904,6 +1904,8 @@ def customize_cms_post_fields():
     s3db.doc_document.file.label = ""
     s3db.event_event_post.event_id.label = ""
 
+    from s3.s3validators import IS_LOCATION_SELECTOR2
+    from s3.s3widgets import S3LocationSelectorWidget2
     table = s3db.cms_post
     field = table.location_id
     field.label = ""
@@ -2228,7 +2230,6 @@ def customize_cms_post(**attr):
                 return False
 
         if r.interactive:
-            from s3.s3forms import S3SQLCustomForm, S3SQLInlineComponent
             table = customize_cms_post_fields()
 
             get_vars = current.request.get_vars
@@ -2269,12 +2270,16 @@ def customize_cms_post(**attr):
             
             field = table.body
             field.label = T("Description")
-            field.widget = None
+            # Plain text not Rich
+            from s3.s3widgets import s3_comments_widget
+            field.widget = s3_comments_widget
             #table.comments.readable = table.comments.writable = False
 
             if current.request.controller == "default":
                 # Don't override card layout for News Feed/Homepage
                 return True
+
+            from s3.s3forms import S3SQLCustomForm, S3SQLInlineComponent
 
             # Filter from a Profile page?
             # If so, then default the fields we know
@@ -3091,8 +3096,10 @@ def customize_org_office(**attr):
                 # Don't add new Locations here
                 location_field.comment = None
                 # L1s only
-                location_field.requires = IS_LOCATION_SELECTOR2(levels=["L1"])
-                location_field.widget = S3LocationSelectorWidget2(levels=["L1"],
+                from s3.s3validators import IS_LOCATION_SELECTOR2
+                from s3.s3widgets import S3LocationSelectorWidget2
+                location_field.requires = IS_LOCATION_SELECTOR2(levels=["L1", "L2"])
+                location_field.widget = S3LocationSelectorWidget2(levels=["L1", "L2"],
                                                                   show_address=True,
                                                                   show_map=False)
             s3.cancel = True
@@ -3336,14 +3343,16 @@ def customize_org_organisation(**attr):
                 query = (ottable.name == "National")
                 national = current.db(query).select(ottable.id,
                                                     limitby=(0, 1)
-                                                    ).first().id
-                s3db.add_component("org_office",
-                                   org_organisation=dict(name="nat_office",
-                                                         joinby="organisation_id",
-                                                         filterby="office_type_id",
-                                                         filterfor=[national],
-                                                         ))
-                list_fields.append("nat_office.location_id$addr_street")
+                                                    ).first()
+                if national:
+                    national = national.id
+                    s3db.add_component("org_office",
+                                       org_organisation=dict(name="nat_office",
+                                                             joinby="organisation_id",
+                                                             filterby="office_type_id",
+                                                             filterfor=[national],
+                                                             ))
+                    list_fields.append("nat_office.location_id$addr_street")
 
             # Represent used in rendering
             current.auth.settings.table_user.organisation_id.represent = s3db.org_organisation_represent
@@ -3568,6 +3577,21 @@ def customize_org_resource(**attr):
 settings.ui.customize_org_resource = customize_org_resource
 
 # -----------------------------------------------------------------------------
+def customize_org_resource_type(**attr):
+    """
+        Customize org_resource_type controller
+    """
+
+    table = current.s3db.org_resource_type
+    table.name.represent = lambda v: T(v) if v else ""
+    table.comments.label = T("Units")
+    table.comments.represent = lambda v: T(v) if v else ""
+
+    return attr
+
+settings.ui.customize_org_resource_type = customize_org_resource_type
+
+# -----------------------------------------------------------------------------
 def customize_pr_person(**attr):
     """
         Customize pr_person controller
@@ -3635,6 +3659,8 @@ def customize_pr_person(**attr):
             image_field = s3db.pr_image.image
             image_field.label = ""
             # ImageCrop widget doesn't currently work within an Inline Form
+            from gluon.validators import IS_IMAGE
+            image_field.requires = IS_IMAGE()
             image_field.widget = None
 
             hr_fields = ["organisation_id",
@@ -3873,6 +3899,7 @@ def customize_project_project(**attr):
                            listadd = False,
                            list_layout = render_projects,
                            )
+
         elif r.interactive or r.representation == "aadata":
             # Filter from a Profile page?
             # If so, then default the fields we know
@@ -3895,9 +3922,10 @@ def customize_project_project(**attr):
 
             s3db.doc_document.file.label = ""
 
+            from s3.s3forms import S3SQLCustomForm, S3SQLInlineComponent, S3SQLInlineComponentMultiSelectWidget
             crud_form_fields = [
                     "name",
-                    S3SQLInlineComponentCheckbox(
+                    S3SQLInlineComponentMultiSelectWidget(
                         "theme",
                         label = T("Themes"),
                         field = "theme_id",
@@ -3954,25 +3982,27 @@ def customize_project_project(**attr):
                 org_field.default = organisation_id
                 org_field.readable = org_field.writable = False
             else:
-                location_field = s3db.project_location.location_id
-                location_id = get_vars.get("~.(location)", None)
-                if location_id:
-                    # Default to this Location, but allow selection of others
-                    location_field.default = location_id
-                location_field.label = ""
-                location_field.represent = S3Represent(lookup="gis_location")
-                # Project Locations must be districts
-                location_field.requires = IS_ONE_OF(current.db, "gis_location.id",
-                                                    S3Represent(lookup="gis_location"),
-                                                    sort = True,
-                                                    filterby = "level",
-                                                    filter_opts = ["L1"]
-                                                    )
-                # Don't add new Locations here
-                location_field.comment = None
-                # Simple dropdown
-                location_field.widget = None
                 crud_form_fields.insert(1, "organisation_id")
+
+            location_field = s3db.project_location.location_id
+            location_id = get_vars.get("~.(location)", None)
+            if location_id:
+                # Default to this Location, but allow selection of others
+                location_field.default = location_id
+            location_field.label = ""
+            represent = S3Represent(lookup="gis_location")
+            location_field.represent = represent
+            # Project Locations must be districts
+            location_field.requires = IS_ONE_OF(current.db, "gis_location.id",
+                                                represent,
+                                                sort = True,
+                                                filterby = "level",
+                                                filter_opts = ["L1"]
+                                                )
+            # Don't add new Locations here
+            location_field.comment = None
+            # Simple dropdown
+            location_field.widget = None
 
             crud_form = S3SQLCustomForm(*crud_form_fields)
 
@@ -4148,6 +4178,7 @@ def customize_doc_document(**attr):
                            "comments",
                            ]
 
+            from s3.s3forms import S3SQLCustomForm
             crud_form = S3SQLCustomForm(*list_fields)
 
             s3db.configure(tablename,

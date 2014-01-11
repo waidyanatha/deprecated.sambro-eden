@@ -1,5 +1,5 @@
 // Module pattern to hide internal vars
-(function () {
+(function() {
     // Module scope
     var map;
 
@@ -28,7 +28,7 @@
         }
         // Modify the Legend Panel & Save Panel
         var map_id = s3.id;
-        $('#' + map_id + ' .map_legend_panel').addClass('fullscreen');
+        $('#' + map_id + ' .map_legend_div').addClass('fullscreen');
         $('#' + map_id + ' .map_save_panel').addClass('fullscreen');
     }
 

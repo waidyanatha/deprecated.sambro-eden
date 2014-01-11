@@ -182,7 +182,7 @@ class S3OrganisationModel(S3Model):
                                    #writable = False,
                                    represent=lambda v: v or NONE,
                                    ),
-                             Field("country", "string", length=2,
+                             Field("country", length=2,
                                    label=T("Home Country"),
                                    #readable = False,
                                    #writable = False,
@@ -711,18 +711,15 @@ class S3OrganisationModel(S3Model):
             field2 = table.acronym
 
             # Fields to return
-            fields = [table.id, field, field2]
+            fields = ["id", "name", "acronym"]
             if use_branches:
-                btable = current.s3db.org_organisation_branch
-                field3 = btable.organisation_id
-                fields.append(field3)
-                db = current.db
+                fields.append("parent.name")
 
-            attributes = dict(orderby=field)
-            limitby = resource.limitby(start=0, limit=limit)
-            if limitby is not None:
-                attributes["limitby"] = limitby
-            rows = resource._load(*fields, **attributes)
+            rows = resource.select(fields,
+                                   start=0,
+                                   limit=limit,
+                                   orderby=field,
+                                   as_rows=True)
             output = []
             append = output.append
             for row in rows:
@@ -732,12 +729,12 @@ class S3OrganisationModel(S3Model):
                     _row = row
                 name = _row.name
                 parent = None
-                if "org_organisation_branch" in row:
-                    query = (table.id == row[btable].organisation_id)
-                    parent = db(query).select(table.name,
-                                              limitby = (0, 1)).first()
-                    if parent:
+                if "org_parent_organisation" in row:
+                    parent = object.__getattribute__(row, "org_parent_organisation")
+                    if parent.name is not None:
                         name = "%s > %s" % (parent.name, name)
+                    else:
+                        parent = None
                 if not parent:
                     acronym = _row.acronym
                     if acronym:
@@ -1155,19 +1152,18 @@ class S3OrganisationResourceModel(S3Model):
                                   super_link("parameter_id", "stats_parameter",
                                              label = T("Resource Type"),
                                              instance_types = ["org_resource_type"],
-                                             represent = S3Represent(lookup="stats_parameter"),
+                                             represent = S3Represent(lookup="stats_parameter",
+                                                                     translate=True),
                                              readable = True,
                                              writable = True,
-                                             empty = True,
+                                             empty = False,
                                              comment = S3AddResourceLink(c="org",
                                                                          f="resource_type",
                                                                          vars = dict(child = "parameter_id"),
                                                                          title=ADD_RESOURCE_TYPE),
                                              ),
                                   Field("value", "integer", 
-                                        requires=IS_NULL_OR(
-                                                    IS_INT_IN_RANGE(0, 999999)
-                                                    ),
+                                        requires=IS_INT_IN_RANGE(0, 999999),
                                         label=T("Quantity")),
                                   s3_comments(),
                                   *s3_meta_fields())
@@ -1223,6 +1219,8 @@ class S3OrganisationSectorModel(S3Model):
         crud_strings = current.response.s3.crud_strings
         define_table = self.define_table
 
+        NONE = current.messages["NONE"]
+        
         location = current.session.s3.location_filter
         if location:
             filterby = "location_id"
@@ -1237,11 +1235,15 @@ class S3OrganisationSectorModel(S3Model):
         #
         tablename = "org_sector"
         table = define_table(tablename,
-                             Field("name", length=128,
+                             Field("name",
+                                   length=128,
                                    notnull=True,
-                                   label=T("Name")),
+                                   label=T("Name"),
+                                   represent=lambda v: T(v) if v is not None \
+                                                       else NONE,
+                                  ),
                              Field("abrv", length=64,
-                                   notnull=True,
+                                   #notnull=True,
                                    label=T("Abbreviation")),
                              self.gis_location_id(
                                     widget=S3LocationAutocompleteWidget(),
@@ -1289,7 +1291,9 @@ class S3OrganisationSectorModel(S3Model):
                 msg_list_empty=T("No Sectors currently registered"))
 
         configure("org_sector",
-                  deduplicate=self.org_sector_duplicate)
+                  deduplicate=self.org_sector_duplicate,
+                  onaccept=self.org_sector_onaccept,
+                  )
 
         sector_comment = lambda child: S3AddResourceLink(c="org", f="sector",
                                                          vars={"child": child},
@@ -1475,7 +1479,22 @@ class S3OrganisationSectorModel(S3Model):
             if duplicate:
                 item.id = duplicate.id
                 item.method = item.METHOD.UPDATE
-        return
+
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def org_sector_onaccept(form):
+        """ If no abrv is set then set it from the name """
+
+        id = form.vars.id
+
+        # Read the record
+        db = current.db
+        table = db.org_sector
+        record = db(table.id == id).select(table.abrv,
+                                           table.name,
+                                           limitby=(0, 1)).first()
+        if not record.abrv:
+            db(table.id == id).update(abrv = record.name[:64])
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -1525,8 +1544,6 @@ class S3OrganisationSectorModel(S3Model):
                 item.id = duplicate.id
                 item.method = item.METHOD.UPDATE
 
-        return
-
 # =============================================================================
 class S3OrganisationServiceModel(S3Model):
     """
@@ -1574,7 +1591,7 @@ class S3OrganisationServiceModel(S3Model):
             msg_list_empty = T("No Services currently registered"))
 
         # Reusable Field
-        represent = S3Represent(lookup=tablename)
+        represent = S3Represent(lookup=tablename, translate=True)
         service_id = S3ReusableField("service_id", table,
                                     sortby = "name",
                                     label = T("Services"),
@@ -2029,28 +2046,23 @@ class S3SiteModel(S3Model):
                                  % MAX_SEARCH_RESULTS)])
         else:
             s3db = current.s3db
-            field = table.name
-            field2 = s3db.gis_location.address
 
             # Fields to return
-            fields = [table.id, field, field2]
-
-            attributes = dict(orderby=field)
-            limitby = resource.limitby(start=0, limit=limit)
-            if limitby is not None:
-                attributes["limitby"] = limitby
-            rows = resource._load(*fields, **attributes)
+            fields = ["site_id", "name", "location_id$address"]
+            rows = resource.select([f.name for f in fields],
+                                   start=0,
+                                   limit=limit,
+                                   orderby=field,
+                                   as_rows=True)
             output = []
             append = output.append
-            represent = s3db.org_site_represent
             for row in rows:
-                name = represent(row[table].site_id)
                 address = row.gis_location.address
                 if address:
-                        name = "%s, %s" % (name, address)
-                record = dict(id = row[table].site_id,
-                              name = name,
-                              )
+                    name = "%s, %s" % (row.org_site.name, address)
+                else:
+                    name = row.org_site.name
+                record = dict(id = row.org_site.site_id, name = name)
                 append(record)
             output = jsons(output)
 

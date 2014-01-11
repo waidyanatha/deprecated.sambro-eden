@@ -3,110 +3,52 @@
 from os import path
 from urllib import urlencode
 
+try:
+    import json # try stdlib (Python 2.6)
+except ImportError:
+    try:
+        import simplejson as json # try external module
+    except:
+        import gluon.contrib.simplejson as json # fallback to pure-Python module
+
 from gluon import current, URL
 from gluon.html import *
 #from gluon.storage import Storage
 
-from s3.s3filter import S3FilterString
-from s3.s3resource import S3URLQuery
+from s3.s3filter import S3FilterForm, S3FilterString, S3OptionsFilter
+from s3.s3resource import S3FieldSelector, S3URLQuery
 from s3.s3summary import S3Summary
-from s3.s3utils import S3CustomController
+from s3.s3utils import s3_auth_user_represent_name, S3CustomController
 
 THEME = "CRMT"
 
 # =============================================================================
-class index():
+class index(S3CustomController):
     """ Custom Home Page """
 
     def __call__(self):
 
+        T = current.T
+        db = current.db
+        s3db = current.s3db
         request = current.request
         response = current.response
+        s3 = response.s3
+
         output = {}
         output["title"] = response.title = current.deployment_settings.get_system_name()
-        view = path.join(request.folder, "private", "templates",
-                         THEME, "views", "index.html")
-        try:
-            # Pass view as file not str to work in compiled mode
-            response.view = open(view, "rb")
-        except IOError:
-            from gluon.http import HTTP
-            raise HTTP("404", "Unable to open Custom View: %s" % view)
-
-        T = current.T
-
-        # This will presumably be modified according to how the update data is stored / retrieved
-        updates = [
-            {"user": "Tom Jones",
-             "profile": URL("static", "themes", args = ["CRMT", "users", "1.jpeg"]),
-             "action": "Added a %s",
-             "type": "Organization",
-             "name": "Helping Hands",
-             "url": URL(""),
-             },
-            {"user": "Frank Sinatra",
-             "profile": URL("static", "themes", args = ["CRMT", "users", "2.jpeg"]),
-             "action": "Saved a %s",
-             "type": "Filter",
-             "name": "My Organization Resources",
-             "url": URL(""),
-             },
-            {"user": "Will Smith",
-             "profile": URL("static", "themes", args = ["CRMT", "users", "3.jpeg"]),
-             "action": "Edited a %s",
-             "type": "Risk",
-             "name": "Wirefires",
-             "url": URL(""),
-             },
-            #{"user": "Marilyn Monroe",
-            # "profile": URL("static", "themes", args = ["CRMT", "users", "4.jpeg"]),
-            # "action": "Saved a %s",
-            # "type": "Map",
-            # "url": URL(""),
-            #},
-            {"user": "Tom Cruise",
-             "profile": URL("static", "themes", args = ["CRMT", "users", "5.jpeg"]),
-             "action": "Add a %s",
-             "type": "Evacuation Route",
-             "name": "Main St",
-             "url": URL(""),
-             },
-        ]
-
-        # Function for converting action, type & name to update content
-        # (Not all updates will have a specific name associated with it, so the link will be on the type)
-        def generate_update(action, type, name, url):
-            if item.get("name"):
-                return TAG[""](action % type,
-                               BR(),
-                               A(name,
-                                 _href=url)
-                               )
-            else:
-                return TAG[""](action % A(type,
-                                          _href=url)
-                               )
-
-        output["updates"] = [dict(user = item["user"],
-                                  profile = item["profile"],
-                                  update = generate_update(item["action"],
-                                                           item["type"],
-                                                           item.get("name"),
-                                                           item["url"],
-                                                           )
-                                  )
-                             for item in updates]
 
         # Map
         auth = current.auth
+        is_logged_in = auth.is_logged_in()
         callback = None
-        if auth.is_logged_in():
+        if is_logged_in:
             # Show the User's Coalition's Polygon
             org_group_id = auth.user.org_group_id
             if org_group_id:
                 # Lookup Coalition Name
                 db = current.db
-                table = current.s3db.org_group
+                table = s3db.org_group
                 query = (table.id == org_group_id)
                 row = db(query).select(table.name,
                                        limitby=(0, 1)).first()
@@ -125,7 +67,7 @@ for(var i=0,len=layers.length;i<len;i++){
  if(layer.name=='All Coalitions'){layer.setVisibility(true)}}
 '''
         map = current.gis.show_map(width=770,
-                                   height=270,
+                                   height=295,
                                    callback=callback,
                                    catalogue_layers=True,
                                    collapsed=True,
@@ -133,29 +75,133 @@ for(var i=0,len=layers.length;i<len;i++){
                                    )
         output["map"] = map
 
-        # Button to go full-screen
-        fullscreen = A(I(_class="icon icon-fullscreen"),
-                       _href=URL(c="gis", f="map_viewing_client"),
-                       _class="gis_fullscreen_map-btn fright",
-                       # If we need to support multiple maps on a page
-                       #_map="default",
-                       _title=T("View full screen"),
-                       )
-
-        output["fullscreen"] = fullscreen
-        s3 = response.s3
-        if s3.debug:
-            script = "/%s/static/scripts/S3/s3.gis.fullscreen.js" % request.application
-        else:
-            script = "/%s/static/scripts/S3/s3.gis.fullscreen.min.js" % request.application
-        s3.scripts.append(script)
-
+        # Description of available Modules
         from s3db.cms import S3CMS
         for item in response.menu:
             item["cms"] = S3CMS.resource_content(module = item["c"], 
                                                  resource = item["f"])
 
+        # Site Activity Log
+        resource = s3db.resource("s3_audit")
+        resource.add_filter(S3FieldSelector("~.method") != "delete")
+        orderby = "s3_audit.timestmp desc"
+        list_fields = ["id",
+                       "method",
+                       "user_id",
+                       "tablename",
+                       "record_id",
+                       ]
+        #current.deployment_settings.ui.customize_s3_audit()
+        db.s3_audit.user_id.represent = s3_auth_user_represent_name
+        listid = "log"
+        datalist, numrows, ids = resource.datalist(fields=list_fields,
+                                                   start=None,
+                                                   limit=4,
+                                                   listid=listid,
+                                                   orderby=orderby,
+                                                   layout=s3.render_log)
+
+        # Placeholder
+        filter_form = DIV(_class="filter_form")
+        if numrows == 0:
+            # Empty table or just no match?
+            from s3.s3crud import S3CRUD
+            table = resource.table
+            if "deleted" in table:
+                available_records = db(table.deleted != True)
+            else:
+                available_records = db(table._id > 0)
+            if available_records.select(table._id,
+                                        limitby=(0, 1)).first():
+                msg = DIV(S3CRUD.crud_string(resource.tablename,
+                                             "msg_no_match"),
+                          _class="empty")
+            else:
+                msg = DIV(S3CRUD.crud_string(resource.tablename,
+                                             "msg_list_empty"),
+                          _class="empty")
+            data = msg
+        else:
+            # Render the list
+            ajaxurl = URL(c="default", f="audit", args="datalist_f.dl")
+            popup_url = URL(c="default", f="audit", args="datalist.popup")
+            dl = datalist.html(ajaxurl=ajaxurl,
+                               pagesize=4,
+                               popup_url=popup_url,
+                               popup_title=T("Updates"),
+                               )
+            data = dl
+
+            if is_logged_in and org_group_id:
+                # Add a Filter
+                filter_widgets = [S3OptionsFilter("user_id$org_group_id",
+                                                  label = "",
+                                                  # Can't just use "" as this is then omitted from rendering
+                                                  options = {"*": T("All"),
+                                                             org_group_id: T("My Community"),
+                                                             },
+                                                  multiple = False,
+                                                  ),
+                                  ]
+
+                filter_submit_url = URL(c="default", f="index")
+                filter_ajax_url = URL(c="default", f="audit", args=["filter.options"])
+                filter_form = S3FilterForm(filter_widgets,
+                                           filter_manager = False,
+                                           formstyle = filter_formstyle,
+                                           clear = False,
+                                           submit = True,
+                                           ajax = True,
+                                           url = filter_submit_url,
+                                           ajaxurl = filter_ajax_url,
+                                           _class = "filter-form",
+                                           _id = "%s-filter-form" % listid
+                                           )
+                filter_form = filter_form.html(resource,
+                                               request.get_vars,
+                                               target=listid,
+                                               )
+
+        output["updates"] = data
+        output["filter_form"] = filter_form
+
+        # Add JavaScript
+        appname = request.application
+        debug = s3.debug
+        scripts_append = s3.scripts.append
+        if debug:
+            # Infinite Scroll doesn't make sense here, but currently required by dataLists.js
+            scripts_append("/%s/static/scripts/jquery.infinitescroll.js" % appname)
+            scripts_append("/%s/static/scripts/jquery.viewport.js" % appname)
+            scripts_append("/%s/static/scripts/S3/s3.dataLists.js" % appname)
+        else:
+            scripts_append("/%s/static/scripts/S3/s3.dataLists.min.js" % appname)
+        #scripts_append("/%s/static/themes/%s/js/homepage.js" % (appname, THEME))
+
+        self._view(THEME, "index.html")
         return output
+
+# =============================================================================
+def filter_formstyle(row_id, label, widget, comment, hidden=False):
+    """
+        Custom Formstyle for FilterForm
+
+        @param row_id: HTML id for the row
+        @param label: the label
+        @param widget: the form widget
+        @param comment: the comment
+        @param hidden: whether the row should initially be hidden or not
+    """
+
+    if hidden:
+        _class = "advanced hide"
+    else:
+        _class= ""
+
+    if label:
+        return DIV(label, widget, _id=row_id, _class=_class)
+    else:
+        return DIV(widget, _id=row_id, _class=_class)
 
 # =============================================================================
 class filters(S3CustomController):
@@ -170,13 +216,16 @@ class filters(S3CustomController):
         if not auth.user:
             permissions.fail()
 
-        pe_id = auth.user.pe_id
         fmt = permissions.format
+
+        if current.request.env.request_method == "POST" and fmt != "dl":
+            return self.update()
+
+        pe_id = auth.user.pe_id
         s3 = current.response.s3
 
         # Filter
-        from s3 import S3FieldSelector as FS
-        f = FS("pe_id") == pe_id
+        f = S3FieldSelector("pe_id") == pe_id
         s3.filter = f
 
         # List Fields
@@ -198,11 +247,19 @@ class filters(S3CustomController):
                                                             args="filters.dl"))
 
         # Title and view
+        T = current.T
         if fmt != "dl":
-            output["title"] = current.T("Saved Filters")
+            output["title"] = T("Saved Filters")
             self._view(THEME, "filters.html")
+
+        # Script for inline-editing of filter title
+        options = {"cssclass": "jeditable-input",
+                   "tooltip": str(T("Click to edit"))}
+        script = """$('.jeditable').editable('%s', %s);""" % \
+                 (URL(args="filters"), json.dumps(options))
+        s3.jquery_ready.append(script)
         return output
-        
+
     # -------------------------------------------------------------------------
     @classmethod
     def render_filter(cls, listid, resource, rfields, record, **attr):
@@ -225,6 +282,7 @@ class filters(S3CustomController):
             item_id = "%s-%s" % (listid, record_id)
         else:
             # template
+            record_id = None
             item_id = "%s-[id]" % listid
 
         raw = record._row
@@ -232,7 +290,7 @@ class filters(S3CustomController):
         resource = current.s3db.resource(resource_name)
 
         T = current.T
-        
+
         # Resource title
         crud_strings = current.response.s3.crud_strings.get(resource.tablename)
         if crud_strings:
@@ -279,7 +337,8 @@ class filters(S3CustomController):
                        _class="card-header"),
                    DIV(
                        DIV(H5(title,
-                              _class="media-heading"),
+                              _id="filter-title-%s" % record_id,
+                              _class="media-heading jeditable"),
                            DIV(query),
                            _class="media-body"),
                        _class="media"),
@@ -287,6 +346,27 @@ class filters(S3CustomController):
                    _id=item_id)
 
         return item
+
+    # -------------------------------------------------------------------------
+    def update(self):
+        """ Simple ajax method to update a saved filter title """
+
+        post_vars = current.request.post_vars
+
+        record_id = post_vars["id"].rsplit("-", 1)[-1]
+        new_title = post_vars["value"]
+
+        if new_title:
+            ftable = current.s3db.pr_filter
+            success = current.db(ftable.id==record_id) \
+                             .update(title=new_title)
+        else:
+            success = False
+
+        if success:
+            return new_title
+        else:
+            raise HTTP(400)
 
     # -------------------------------------------------------------------------
     @staticmethod
@@ -330,7 +410,7 @@ class filters(S3CustomController):
             tab_vars = list_vars + [("t", str(tab_idx))]
             links[section["name"]] = "%s?%s" % (base_url, urlencode(tab_vars))
             tab_idx += 1
-            
+
         return links
         
 # END =========================================================================

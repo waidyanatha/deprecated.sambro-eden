@@ -57,7 +57,7 @@ from s3rest import S3Method
 from s3resource import S3FieldSelector, S3ResourceField, S3URLQuery
 from s3utils import s3_unicode, S3TypeConverter
 from s3validators import *
-from s3widgets import S3DateWidget, S3DateTimeWidget, S3MultiSelectWidget, S3OrganisationHierarchyWidget, S3GroupedOptionsWidget, s3_grouped_checkboxes_widget
+from s3widgets import S3DateWidget, S3DateTimeWidget, S3GroupedOptionsWidget, S3MultiSelectWidget, S3OrganisationHierarchyWidget, S3RadioOptionsWidget, s3_grouped_checkboxes_widget
 
 # =============================================================================
 class S3FilterWidget(object):
@@ -1144,14 +1144,21 @@ class S3OptionsFilter(S3FilterWidget):
                     filter = opts.get("filter", False),
                     header = opts.get("header", False),
                     selectedList = opts.get("selectedList", 3))
+        # Radio is just GroupedOpts with multiple=False
+        #elif widget_type == "radio":
+        #    widget_class = "radio-filter-widget"
+        #    w = S3RadioOptionsWidget(options = options,
+        #                             cols = opts["cols"],
+        #                             help_field = opts["help_field"],
+        #                             )
         else:
             widget_class = "groupedopts-filter-widget"
-            w = S3GroupedOptionsWidget(
-                    options = options,
-                    multiple = True,
-                    cols = opts["cols"],
-                    size = opts["size"] or 12,
-                    help_field = opts["help_field"])
+            w = S3GroupedOptionsWidget(options = options,
+                                       multiple = opts.get("multiple", True),
+                                       cols = opts["cols"],
+                                       size = opts["size"] or 12,
+                                       help_field = opts["help_field"],
+                                       )
 
         # Add widget class and default class
         classes = set(attr.get("_class", "").split()) | \
@@ -1193,7 +1200,8 @@ class S3OptionsFilter(S3FilterWidget):
                                 multiple = True,
                                 cols = opts["cols"],
                                 size = opts["size"] or 12,
-                                help_field = opts["help_field"])
+                                help_field = opts["help_field"]
+                                )
                 options = {attr["_id"]:
                            widget._options({"type": ftype}, [])}
         return options
@@ -1413,6 +1421,8 @@ class S3FilterForm(object):
         attr["_id"] = form_id
 
         opts = self.opts
+
+        # Form style
         formstyle = opts.get("formstyle", None)
         if not formstyle:
             formstyle = self._formstyle
@@ -1428,44 +1438,65 @@ class S3FilterForm(object):
         if controls:
             rows.append(formstyle(None, "", controls, ""))
 
-        # Submit button
+        # Submit elements
+        ajax = opts.get("ajax", False)
         submit = opts.get("submit", False)
         if submit:
-            _class = "filter-submit"
-            ajax = opts.get("ajax", False)
-            if ajax:
-                _class = "%s filter-ajax" % _class
+
+            settings = current.deployment_settings
+            
+            # Auto-submit
+            auto_submit = settings.get_ui_filter_auto_submit()
+            if auto_submit and opts.get("auto_submit", True):
+                script = """S3.search.filterFormAutoSubmit('%s',%s)""" % \
+                         (form_id, auto_submit)
+                current.response.s3.jquery_ready.append(script)
+
+            # Custom label and class
+            _class = None
             if submit is True:
                 label = current.T("Search")
             elif isinstance(submit, (list, tuple)):
-                label = submit[0]
-                _class = "%s %s" % (submit[1], _class)
+                label, _class = submit
             else:
                 label = submit
+
+            # Submit button
+            submit_button = INPUT(_type="button",
+                                  _value=label,
+                                  _class="filter-submit")
+            #if auto_submit:
+                #submit_button.add_class("hide")
+            if _class:
+                submit_button.add_class(_class)
+
             # Where to request filtered data from:
             submit_url = opts.get("url", URL(vars={}))
+            
             # Where to request updated options from:
             ajax_url = opts.get("ajaxurl", URL(args=["filter.options"], vars={}))
-            submit = TAG[""](
-                        INPUT(_type="button",
-                              _value=label,
-                              _class=_class),
-                        INPUT(_type="hidden",
-                              _class="filter-ajax-url",
-                              _value=ajax_url),
-                        INPUT(_type="hidden",
-                              _class="filter-submit-url",
-                              _value=submit_url))
 
+            # Submit row elements
+            submit = TAG[""](submit_button,
+                             INPUT(_type="hidden",
+                                   _class="filter-ajax-url",
+                                   _value=ajax_url),
+                             INPUT(_type="hidden",
+                                   _class="filter-submit-url",
+                                   _value=submit_url))
             if ajax and target:
                 submit.append(INPUT(_type="hidden",
                                     _class="filter-submit-target",
                                     _value=target))
 
-            rows.append(formstyle(None, "", submit, ""))
+            # Append submit row
+            submit_row = formstyle(None, "", submit, "")
+            if auto_submit and hasattr(submit_row, "add_class"):
+                submit_row.add_class("hide")
+            rows.append(submit_row)
 
         # Filter Manager (load/apply/save filters)
-        fm = current.deployment_settings.get_search_filter_manager()
+        fm = settings.get_search_filter_manager()
         if fm and opts.get("filter_manager", resource is not None):
             filter_manager = self._render_filters(resource, form_id)
             if filter_manager:
@@ -1486,6 +1517,10 @@ class S3FilterForm(object):
             else:
                 form = FORM(DIV(rows), **attr)
             form.add_class("filter-form")
+            if ajax:
+                form.add_class("filter-ajax")
+        else:
+            return ""
 
         # Put a copy of formstyle into the form for access by the view
         form.formstyle = formstyle
@@ -1563,7 +1598,7 @@ class S3FilterForm(object):
         if clear:
             _class = "filter-clear"
             if clear is True:
-                label = current.T("Reset filter")
+                label = current.T("Clear filter")
             elif isinstance(clear, (list, tuple)):
                 label = clear[0]
                 _class = "%s %s" % (clear[1], _class)
@@ -1684,16 +1719,21 @@ class S3FilterForm(object):
         _t = lambda s: str(T(s))
 
         # Configure the widget
+        settings = current.deployment_settings
         config = dict(
 
             # Filters and Ajax URL
             filters = filters,
             ajaxURL = ajaxurl,
 
+            # Workflow Options
+            allowDelete = settings.get_search_filter_manager_allow_delete(),
+
             # Tooltips for action icons/buttons
-            saveTooltip = _t("Update saved filter"),
+            createTooltip = _t("Save current options as new filter"),
             loadTooltip = _t("Load filter"),
-            createTooltip = _t("Create new filter from current options"),
+            saveTooltip = _t("Update saved filter"),
+            deleteTooltip = _t("Delete saved filter"),
 
             # Hints
             titleHint = _t("Enter a title..."),
@@ -1701,19 +1741,21 @@ class S3FilterForm(object):
             emptyHint = _t("No saved filters"),
 
             # Confirm update + confirmation text
-            confirmUpdate = True,
-            confirmText = _t("Update this filter?"),
+            confirmUpdate = _t("Update this filter?"),
+            confirmDelete = _t("Delete this filter?"),
         )
 
         # Render actions as buttons with text if configured, otherwise
         # they will appear as empty DIVs with classes for CSS icons
-        settings = current.deployment_settings
         create_text = settings.get_search_filter_manager_save()
         if create_text:
             config["createText"] = _t(create_text)
         update_text = settings.get_search_filter_manager_update()
         if update_text:
             config["saveText"] = _t(update_text)
+        delete_text = settings.get_search_filter_manager_delete()
+        if delete_text:
+            config["deleteText"] = _t(delete_text)
         load_text = settings.get_search_filter_manager_load()
         if load_text:
             config["loadText"] = _t(load_text)
@@ -1785,8 +1827,12 @@ class S3Filter(S3Method):
                 # Load list of saved filters
                 return self._load(r, **attr)
             elif r.http == "POST":
-                # Save a filter
-                return self._save(r, **attr)
+                if "delete" in r.get_vars:
+                    # Delete a filter
+                    return self._delete(r, **attr)
+                else:
+                    # Save a filter
+                    return self._save(r, **attr)
             else:
                 r.error(405, r.ERROR.BAD_METHOD)
                 
@@ -1841,11 +1887,60 @@ class S3Filter(S3Method):
         return options
 
     # -------------------------------------------------------------------------
+    def _delete(self, r, **attr):
+        """
+            Delete a filter, responds to POST filter.json?delete=
+            
+            @param r: the S3Request
+            @param attr: additional controller parameters
+        """
+            
+        # Authorization, get pe_id
+        auth = current.auth
+        if auth.s3_logged_in():
+            pe_id = current.auth.user.pe_id
+        else:
+            pe_id = None
+        if not pe_id:
+            r.unauthorised()
+
+        # Read the source
+        source = r.body
+        source.seek(0)
+
+        try:
+            data = json.load(source)
+        except ValueError:
+            # Syntax error: no JSON data
+            r.error(501, r.ERROR.BAD_SOURCE)
+
+        # Try to find the record
+        db = current.db
+        s3db = current.s3db
+
+        table = s3db.pr_filter
+        record = None
+        record_id = data.get("id")
+        if record_id:
+            query = (table.id == record_id) & (table.pe_id == pe_id)
+            record = db(query).select(table.id, limitby=(0, 1)).first()
+        if not record:
+            r.error(501, r.ERROR.BAD_RECORD)
+            
+        resource = s3db.resource("pr_filter", id=record_id)
+        success = resource.delete(ondelete=resource.get_config("ondelete"),
+                                 format=r.representation)
+
+        if not success:
+            raise(400, current.manager.error)
+        else:
+            current.response.headers["Content-Type"] = "application/json"
+            return current.xml.json_message(deleted=record_id)
+
+    # -------------------------------------------------------------------------
     def _save(self, r, **attr):
         """
-            Save a filter
-
-            POST filter.json
+            Save a filter, responds to POST filter.json
             
             @param r: the S3Request
             @param attr: additional controller parameters
@@ -1909,9 +2004,11 @@ class S3Filter(S3Method):
 
         # Store record
         onaccept = None
+        form = Storage(vars=filter_data)
         if record:
             success = db(table.id == record_id).update(**filter_data)
             if success:
+                current.audit("update", "pr", "filter", form, record_id, "json")
                 info = {"updated": record_id}
                 onaccept = s3db.get_config(table, "update_onaccept",
                            s3db.get_config(table, "onaccept"))
@@ -1919,13 +2016,14 @@ class S3Filter(S3Method):
             success = table.insert(**filter_data)
             if success:
                 record_id = success
+                current.audit("create", "pr", "filter", form, record_id, "json")
                 info = {"created": record_id}
                 onaccept = s3db.get_config(table, "update_onaccept",
                            s3db.get_config(table, "onaccept"))
 
         if onaccept is not None:
-            filter_data["id"] = record_id
-            callback(onaccept, Storage(vars=filter_data))
+            form.vars["id"] = record_id
+            callback(onaccept, form)
 
         # Success/Error response
         xml = current.xml

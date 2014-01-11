@@ -88,8 +88,8 @@ class S3Report2(S3Method):
         widget_id = "pivottable"
 
         # @todo: make configurable:
-        maxrows = 20
-        maxcols = 20
+        maxrows = 10
+        maxcols = 10
 
         # Extract the relevant GET vars
         get_vars = dict((k, v) for k, v in r.get_vars.iteritems()
@@ -128,7 +128,7 @@ class S3Report2(S3Method):
                         method = "count"
                 else:
                     selector, method = m.group(2), m.group(1)
-                    
+
             if not layer or not any([rows, cols]):
                 pivottable = None
             else:
@@ -147,7 +147,9 @@ class S3Report2(S3Method):
         if pivottable is not None:
             pivotdata = pivottable.json(maxrows=maxrows,
                                         maxcols=maxcols,
-                                        url=r.url(method=""))
+                                        url=r.url(method="",
+                                                  representation="",
+                                                  vars={}))
         else:
             pivotdata = None
 
@@ -155,9 +157,8 @@ class S3Report2(S3Method):
 
             response = current.response
             tablename = resource.tablename
-            title = response.s3.crud_strings[tablename].get("title_report",
-                                                            current.T("Report"))
-            output["title"] = title
+            
+            output["title"] = self.crud_string(tablename, "title_report")
 
             # Filter widgets
             filter_widgets = get_config("filter_widgets", None)
@@ -224,7 +225,99 @@ class S3Report2(S3Method):
             @param attr: controller attributes
         """
 
-        r.error(405, current.manager.ERROR.BAD_METHOD)
+        output = {}
+
+        resource = self.resource
+        get_config = resource.get_config
+
+        # @todo: make configurable:
+        maxrows = 20
+        maxcols = 20
+
+        # Extract the relevant GET vars
+        get_vars = dict((k, v) for k, v in r.get_vars.iteritems()
+                        if k in ("rows",
+                                 "cols",
+                                 "fact",
+                                 "aggregate",
+                                 "totals"))
+
+        # Fall back to report options defaults
+        report_options = get_config("report_options", {})
+        defaults = report_options.get("defaults", {})
+
+        if not any (k in get_vars for k in ("rows", "cols", "fact")):
+            get_vars = defaults
+        get_vars["chart"] = r.get_vars.get("chart",
+                              defaults.get("chart", None))
+        get_vars["table"] = r.get_vars.get("table",
+                              defaults.get("table", None))
+                              
+        # Generate the pivot table
+        if get_vars:
+
+            rows = get_vars.get("rows", None)
+            cols = get_vars.get("cols", None)
+            layer = get_vars.get("fact", "id")
+
+            # Backward-compatiblity: alternative "aggregate" option
+            if layer is not None:
+                m = layer_pattern.match(layer)
+                if m is None:
+                    selector = layer
+                    if get_vars and "aggregate" in get_vars:
+                        method = get_vars["aggregate"]
+                    else:
+                        method = "count"
+                else:
+                    selector, method = m.group(2), m.group(1)
+
+            if not layer or not any([rows, cols]):
+                pivottable = None
+            else:
+                prefix = resource.prefix_selector
+                selector = prefix(selector)
+                layer = (selector, method)
+                get_vars["rows"] = prefix(rows) if rows else None
+                get_vars["cols"] = prefix(cols) if cols else None
+                get_vars["fact"] = "%s(%s)" % (method, selector)
+
+                if visible:
+                    pivottable = resource.pivottable(rows, cols, [layer])
+                else:
+                    pivottable = None
+        else:
+            pivottable = None
+
+        # Render as JSON-serializable dict
+        if pivottable is not None:
+            pivotdata = pivottable.json(maxrows=maxrows,
+                                        maxcols=maxcols,
+                                        url=r.url(method="",
+                                                  representation="",
+                                                  vars={}))
+        else:
+            pivotdata = None
+
+        if r.representation in ("html", "iframe"):
+
+            # Generate the report form
+            ajax_vars = Storage(r.get_vars)
+            ajax_vars.update(get_vars)
+            ajaxurl = r.url(method="report2",
+                            representation="json",
+                            vars=ajax_vars)
+
+            output = S3ReportForm(resource).html(pivotdata,
+                                                 get_vars = get_vars,
+                                                 filter_widgets = None,
+                                                 ajaxurl = ajaxurl,
+                                                 widget_id = widget_id)
+
+        else:
+            r.error(501, r.ERROR.BAD_FORMAT)
+
+        return output
         
 # =============================================================================
 class S3ReportForm(object):
@@ -251,15 +344,15 @@ class S3ReportForm(object):
         T = current.T
 
         # Report options
-        report_options, hidden = self.report_options(get_vars = get_vars,
-                                                     widget_id = widget_id)
+        report_options = self.report_options(get_vars = get_vars,
+                                             widget_id = widget_id)
 
         # Pivot data
         if pivotdata is not None:
             labels = pivotdata["labels"]
         else:
             labels = None
-        hidden["pivotdata"] = json.dumps(pivotdata)
+        hidden = {"pivotdata": json.dumps(pivotdata)}
             
         empty = T("No report specified.")
         hide = T("Hide Table")
@@ -305,29 +398,30 @@ class S3ReportForm(object):
                         ),
                         _class="pt-form-container form-container"
                    ),
-                   DIV(DIV(_class="pt-chart-controls"),
-                       DIV(DIV(_class="pt-hide-chart"),
-                           DIV(_class="pt-chart-title"),
-                           DIV(_class="pt-chart"),
-                           _class="pt-chart-contents"
+                   DIV(IMG(_src=throbber,
+                           _alt=current.T("Processing"),
+                           _class="pt-throbber"),
+                       DIV(DIV(_class="pt-chart-controls"),
+                           DIV(DIV(_class="pt-hide-chart"),
+                               DIV(_class="pt-chart-title"),
+                               DIV(_class="pt-chart"),
+                               _class="pt-chart-contents"
+                           ),
+                           _class="pt-chart-container"
                        ),
-                       _class="pt-chart-container"
-                   ),
-                   DIV(hide,
-                       _class="pt-toggle-table pt-hide-table"),
-                   DIV(show,
-                       _class="pt-toggle-table pt-show-table",
-                       _style="display:none"),
-                   DIV(DIV(_class="pt-table-controls"),
-                       DIV(IMG(_src=throbber,
-                               _alt=current.T("Processing"),
-                               _class="pt-throbber"),
-                           DIV(_class="pt-table"),
-                           _class="pt-table-contents"
+                       DIV(hide,
+                           _class="pt-toggle-table pt-hide-table"),
+                       DIV(show,
+                           _class="pt-toggle-table pt-show-table",
+                           _style="display:none"),
+                       DIV(DIV(_class="pt-table-controls"),
+                           DIV(DIV(_class="pt-table"),
+                               _class="pt-table-contents"
+                           ),
+                           _class="pt-table-container"
                        ),
-                       _class="pt-table-container"
+                       DIV(empty, _class="pt-empty"),
                    ),
-                   DIV(empty, _class="pt-empty"),
                    _class="pt-container",
                    _id=widget_id
                )
@@ -352,6 +446,8 @@ class S3ReportForm(object):
             "renderChart": True,
             "collapseChart": True,
             "defaultChart": None,
+
+            "autoSubmit": settings.get_ui_report_auto_submit(),
         }
 
         chart_opt = get_vars["chart"]
@@ -409,11 +505,10 @@ $("#%(widget_id)s").pivottable(%(opts)s);""" % {
 
         # Layer selector
         layer_id = "%s-fact" % widget_id
-        layer, hidden = self.layer_options(options=options,
+        layer, single = self.layer_options(options=options,
                                            get_vars=get_vars,
                                            widget_id=layer_id)
-        single_opt = {"_class": "pt-fact-single-option"} \
-                     if hidden else {}
+        single_opt = {"_class": "pt-fact-single-option"} if single else {}
         if layer:
             selectors.append(TR(label(FACT, _for=layer_id),
                                 TD(layer),
@@ -467,7 +562,7 @@ $("#%(widget_id)s").pivottable(%(opts)s);""" % {
                                   selectors,
                                   _id="%s-options" % widget_id)
 
-        return fieldset, hidden
+        return fieldset
 
     # -------------------------------------------------------------------------
     def axis_options(self, axis,
@@ -569,12 +664,13 @@ $("#%(widget_id)s").pivottable(%(opts)s);""" % {
         for layer in layers:
 
             # Extract layer option
-            if type(layer) is tuple and \
-               (isinstance(layer[0], lazyT) or layer[1] not in all_methods):
-                opt = [layer]
+            if type(layer) is tuple:
+                if isinstance(layer[0], lazyT):
+                    opt = [layer]
+                else:
+                    opt = list(layer)
             else:
-                opt = list(layer) \
-                      if isinstance(layer, (tuple, list)) else [layer]
+                opt = [layer]
 
             # Get field label and selector
             s = opt[0]
@@ -582,9 +678,15 @@ $("#%(widget_id)s").pivottable(%(opts)s);""" % {
                 label, selector = s
             else:
                 label, selector = None, s
-            selector = prefix(selector)
 
+            # Function-style layer
+            m = layer_pattern.match(selector)
+            if m is not None:
+                selector, method = m.group(2), m.group(1)
+                opt = [selector, method] + list(opt[1:])
+                
             # Resolve the selector
+            selector = prefix(selector)
             rfield = resource.resolve_selector(selector)
             if not rfield.field and not rfield.virtual:
                 continue
@@ -658,22 +760,27 @@ $("#%(widget_id)s").pivottable(%(opts)s);""" % {
                 selector = prefix(selector)
                 layer = "%s(%s)" % (method, selector)
 
-        # Field is read-only if there is only 1 option
         if len(layer_opts) == 1:
+            # Field is read-only if there is only 1 option
             default = layer_opts[0]
-            return default[1], {"fact": default[0]}
-
-        # Dummy field
-        dummy_field = Storage(name="fact",
-                              requires=IS_IN_SET(layer_opts))
-
-        # Construct widget
-        widget = OptionsWidget.widget(dummy_field,
-                                      layer,
-                                      _id=widget_id,
-                                      _name="fact",
-                                      _class="pt-fact")
-        return widget, {}
+            widget = TAG[""](default[1],
+                             INPUT(_type="hidden",
+                                   _id=widget_id,
+                                   _name=widget_id,
+                                   _value=default[0]))
+            single = True
+        else:
+            # Render Selector
+            dummy_field = Storage(name="fact",
+                                requires=IS_IN_SET(layer_opts))
+            widget = OptionsWidget.widget(dummy_field,
+                                          layer,
+                                          _id=widget_id,
+                                          _name="fact",
+                                          _class="pt-fact")
+            single = False
+            
+        return widget, single
 
     # -------------------------------------------------------------------------
     @staticmethod

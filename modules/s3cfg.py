@@ -49,9 +49,10 @@ class S3Config(Storage):
 
     def __init__(self):
         self.auth = Storage()
-        self.auth.email_domains=[]
+        self.auth.email_domains = []
         self.base = Storage()
         self.database = Storage()
+        # @ToDo: Move to self.ui
         self.frontpage = Storage()
         self.frontpage.rss = []
         self.fin = Storage()
@@ -121,6 +122,13 @@ class S3Config(Storage):
             Google Analytics Key
         """
         return self.base.get("google_analytics_tracking_id", None)
+
+    # -------------------------------------------------------------------------
+    def get_youtube_video_id(self):
+        """
+            YouTube ID
+        """
+        return self.base.get("youtube_id", None)
 
     # -------------------------------------------------------------------------
     # Authentication settings
@@ -396,35 +404,82 @@ class S3Config(Storage):
             System Name (Short Version) - for the UI & Messaging
         """
         return self.base.get("system_name_short", "Sahana Eden")
+
     def get_base_debug(self):
+        """
+            Debug mode: Serve CSS/JS in separate uncompressed files
+        """
         return self.base.get("debug", False)
+
     def get_base_migrate(self):
         """ Whether to allow Web2Py to migrate the SQL database to the new structure """
         return self.base.get("migrate", True)
     def get_base_fake_migrate(self):
         """ Whether to have Web2Py create the .table files to match the expected SQL database structure """
         return self.base.get("fake_migrate", False)
+        
     def get_base_prepopulate(self):
         """ Whether to prepopulate the database &, if so, which set of data to use for this """
         return self.base.get("prepopulate", 1)
+
     def get_base_guided_tour(self):
         """ Whether the guided tours are enabled """
         return self.base.get("guided_tour", False)
+
     def get_base_public_url(self):
+        """
+            The Public URL for the site - for use in email links, etc
+        """
         return self.base.get("public_url", "http://127.0.0.1:8000")
+
     def get_base_cdn(self):
+        """
+            Should we use CDNs (Content Distribution Networks) to serve some common CSS/JS?
+        """
         return self.base.get("cdn", False)
+
     def get_base_session_memcache(self):
         """
             Should we store sessions in a Memcache service to allow sharing
             between multiple instances?
         """
         return self.base.get("session_memcache", False)
+
     def get_base_solr_url(self):
         """
             URL to connect to solr server
         """    
         return self.base.get("solr_url", False)
+
+    def get_import_callback(self, tablename, callback):
+        """
+            Lookup callback to use for imports in the following order:
+                - custom [create, update]_onxxxx
+                - default [create, update]_onxxxx
+                - custom onxxxx
+                - default onxxxx
+            NB: Currently only onaccept is actually used
+        """
+        callbacks = self.base.get("import_callbacks", [])
+        if tablename in callbacks:
+            callbacks = callbacks[tablename]
+            if callback in callbacks:
+                return callbacks[callback]
+
+        get_config = current.s3db.get_config
+        default = get_config(tablename, callback)
+        if default:
+            return default
+
+        if callback[:2] != "on":
+            callback = callback[7:]
+
+            if callback in callbacks:
+                return callbacks[callback]
+
+            default = get_config(tablename, callback)
+            if default:
+                return default
 
     # -------------------------------------------------------------------------
     # Database settings
@@ -562,6 +617,10 @@ class S3Config(Storage):
     def get_gis_layer_tree_radio(self):
         " Use a radio button for custom folders in the Map's Layer Tree "
         return self.gis.get("layer_tree_radio", False)
+
+    def get_gis_layers_label(self):
+        " Label for the Map's Layer Tree "
+        return self.gis.get("layers_label", "Layers")
 
     def get_gis_map_height(self):
         """
@@ -794,6 +853,16 @@ class S3Config(Storage):
         """
         return self.L10n.get("translate_gis_location", False)
 
+    def get_L10n_pootle_url(self):
+        """ URL for Pootle server """
+        return self.L10n.get("pootle_url", "http://pootle.sahanafoundation.org/")
+    def get_L10n_pootle_username(self):
+        """ Username for Pootle server """
+        return self.L10n.get("pootle_username", False)
+    def get_L10n_pootle_password(self):
+        """ Password for Pootle server """
+        return self.L10n.get("pootle_password", False)
+
     # -------------------------------------------------------------------------
     # PDF settings
     def get_paper_size(self):
@@ -880,7 +949,7 @@ class S3Config(Storage):
 
     def ui_customize(self, tablename, **attr):
         """
-            Customize field settings for a table
+            Customize a Controller
         """
         customize = self.ui.get("customize_%s" % tablename)
         if customize:
@@ -1005,6 +1074,20 @@ class S3Config(Storage):
 
         return self.ui.get("summary", None)
 
+    def get_ui_filter_auto_submit(self):
+        """
+            Time in milliseconds after the last filter option change to
+            automatically update the filter target(s), set to 0 to disable
+        """
+        return self.ui.get("filter_auto_submit", 0)
+
+    def get_ui_report_auto_submit(self):
+        """
+            Time in milliseconds after the last filter option change to
+            automatically update the filter target(s), set to 0 to disable
+        """
+        return self.ui.get("report_auto_submit", 0)
+
     # =========================================================================
     # Messaging
     # -------------------------------------------------------------------------
@@ -1085,7 +1168,17 @@ class S3Config(Storage):
             function()
         """
         return self.msg.get("notify_renderer", None)
-                            
+
+    # -------------------------------------------------------------------------
+    # Outbox settings
+    def get_msg_max_send_retries(self):
+        """
+            Maximum number of retries to send a message before
+            it is regarded as permanently failing; set to None
+            to retry forever.
+        """
+        return self.msg.get("max_send_retries", 9)
+    
     # -------------------------------------------------------------------------
     # Save Search and Subscription
     def get_search_max_results(self):
@@ -1110,6 +1203,10 @@ class S3Config(Storage):
         """ Enable the filter manager widget """
         return self.search.get("filter_manager", True)
 
+    def get_search_filter_manager_allow_delete(self):
+        """ Allow deletion of saved filters """
+        return self.search.get("filter_manager_allow_delete", True)
+
     def get_search_filter_manager_save(self):
         """ Text for saved filter save-button """
         return self.search.get("filter_manager_save", None)
@@ -1117,6 +1214,10 @@ class S3Config(Storage):
     def get_search_filter_manager_update(self):
         """ Text for saved filter update-button """
         return self.search.get("filter_manager_update", None)
+
+    def get_search_filter_manager_delete(self):
+        """ Text for saved filter delete-button """
+        return self.search.get("filter_manager_delete", None)
 
     def get_search_filter_manager_load(self):
         """ Text for saved filter load-button """
