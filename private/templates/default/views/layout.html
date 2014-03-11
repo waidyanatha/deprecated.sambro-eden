@@ -42,7 +42,6 @@
  <link href="/{{=appname}}/static/themes/{{=response.s3.theme}}/eden.min.css" rel="stylesheet" type="text/css" />
 {{pass}}
 {{include "scripts_top.html"}}
-
 </head>
 {{try:}}
  {{if r.representation == "popup":}}{{representation = "popup"}}
@@ -82,9 +81,12 @@
      {{#include "breadcrumbs.html"}} 
      {{include}}
     </div>
-    <a href='/{{=appname}}/cap/alert/create'><i class='icon-new'></i> {{=T("New Alert")}}</a>
    </div>
   </div>
+ </div>
+ <div id='footer'>
+  {{include "../private/templates/%s/views/footer.html" % response.s3.theme}}
+
  </div>
 {{pass}}
 {{include "scripts.html"}}

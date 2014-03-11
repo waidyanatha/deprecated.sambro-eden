@@ -33,7 +33,6 @@ __all__ = ["S3CAPModel",
            "cap_alert_rheader",
            "cap_template_rheader",
            "cap_info_rheader",
-           "cap_public_alrt"
            ]
 
 import time
@@ -327,7 +326,7 @@ class S3CAPModel(S3Model):
         else:
             ADD_ALERT = T("Create Alert")
             crud_strings[tablename] = Storage(
-                title_create =T("Create Template"),
+                title_create = ADD_ALERT,
                 title_display = T("Alert Details"),
                 title_list = T("Alerts"),
                 title_update = T("Edit Alert"), # If already-published, this should create a new "Update" alert instead of modifying the original
@@ -972,43 +971,4 @@ def update_alert_id(table):
 
     return func
 
-# ----------------------------------------------------------------------
-
-def cap_public_alrt(r):
-    """ Resource Header for Alert templates"""
-
-    if r.representation == "html":
-        item = r.record
-        if item:
-
-            T = current.T
-
-            table = current.s3db.cap_info
-            query = (table.alert_id == item.id)
-            row = current.db(query).select(table.id,
-                                           limitby=(0, 1)).first()
-            error = []
-            if not (row and row.id):
-                error.append(DIV(T("An alert needs to contain at least one info item."),
-                                   _class="error"))
-
-            tabs = [
-                    (T("Template"), None),
-                    (T("Information template"), "info"),
-                    #(T("Edit Area"), "area"),
-                    #(T("Resource Files"), "resource"),
-                   ]
-
-            rheader_tabs = s3_rheader_tabs(r, tabs)
-
-            rheader = DIV(TABLE(( TH("%s: " % T("Template")),
-                                    A(S3CAPModel.template_represent(item.id),
-                                      _href=URL(c="cap", f="template", args=[item.id, "update"]))
-                                  )
-                               ),
-                          rheader_tabs,
-                          *error
-                         )
-            return rheader
-    return None
 # END =========================================================================

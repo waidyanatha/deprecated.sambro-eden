@@ -8,8 +8,14 @@
 <ul>
 <li>{{=T("Create and broadcast CAP messages")}}</li>
 <li>{{=T("Facilitate easy creation using CAP Profiles and templates")}}</li>
-<li><a href="/eden/cap/alert?alert.is_template=false">List alerts</a></li>
+<div id='menu_options'>
+     {{=current.menu.options}}
+    </div>
 </ul>
 </div>
+<div id='content' class='cf'>
+     {{#include "breadcrumbs.html"}}
+     {{include}}
+   </div>
       
       

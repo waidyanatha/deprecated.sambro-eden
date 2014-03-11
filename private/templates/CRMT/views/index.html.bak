@@ -13,7 +13,7 @@
           			<iframe src="/{{=appname}}/default/public_alert.html" width="270" height="200" scrolling="no" frameBorder="0" >
             		</iframe>
          				<span class = "filter_opts">
-                            &nbsp;&nbsp;<a href="/{{=appname}}/cap/alert/search" target="_top">More</a>
+                            &nbsp;&nbsp;<a href="http://scdmc.lk/eden_updated/cap/alert/search" target="_top">More</a>
         			</span>
          		</div>      
                </div>

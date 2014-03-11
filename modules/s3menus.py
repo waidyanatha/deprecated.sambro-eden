@@ -1265,9 +1265,9 @@ class S3OptionsMenu(object):
                         M("List templates", f="template", vars={'alert.is_template': 'true'}),
                         M("Create template", f="template", m="create"),
                     ),
-                    M("CAP Profile", f="profile")(
-                        M("Edit profile", f="profile")
-                    )
+                    #M("CAP Profile", f="profile")(
+                    #    M("Edit profile", f="profile")
+                    #)
                 )
 
     # -------------------------------------------------------------------------

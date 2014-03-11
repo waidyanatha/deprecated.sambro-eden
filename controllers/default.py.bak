@@ -1177,7 +1177,7 @@ def contact():
 # -----------------------------------------------------------------------------
 
 def public_alert():
-    it = s3db.executesql('SELECT incidents,template_title, id FROM cap_alert ORDER BY created_on ASC LIMIT 3;')
+    it = s3db.executesql('SELECT id,template_title FROM cap_alert ORDER BY created_on ASC LIMIT 3;')
     records = s3db.cap_alert
     alt_id = it[0]
     #alt_teSe = it[1]

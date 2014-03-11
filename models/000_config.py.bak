@@ -14,7 +14,7 @@
 """
 
 # Remove this line when you have edited this file sufficiently to proceed to the web interface
-#FINISHED_EDITING_CONFIG_FILE = False
+FINISHED_EDITING_CONFIG_FILE = True
 
 # Select the Template
 # - which Modules are enabled
@@ -35,7 +35,7 @@ settings.database.host = "localhost"
 settings.database.port = 3306
 #settings.database.port = 5432
 # Uncomment to select a different name for your database
-settings.database.database = "sahana"
+settings.database.database = "sahana_cus"
 # Uncomment to select a different username for your database
 settings.database.username = "root"
 # Uncomment to set the password
@@ -47,10 +47,17 @@ settings.database.pool_size = 30
 #settings.gis.spatialdb = True
 
 # Base settings
-#settings.base.system_name = T("Sahana Eden Humanitarian Management Platform")
+settings.base.system_name = T("Sahana Eden Humanitarian Management Platform")
 #settings.base.system_name_short = T("Sahana Eden")
 # Set this to the Public URL of the instance
-#settings.base.public_url = "http://127.0.0.1:8000"
+settings.base.public_url = "http://scdmc.lk"
+
+# Uncomment to set pootle url
+# settings.L10n.pootle_url = "http://pootle.sahanafoundation.org/"
+
+# Uncomment to set pootle username and password
+# settings.L10n.pootle_username = "username"
+# settings.L10n.pootle_password = "*****"
 
 # Switch to "False" in Production for a Performance gain
 # (need to set to "True" again when Table definitions are changed)
@@ -63,7 +70,7 @@ settings.base.migrate = True
 # JS Debug messages are also available in the Console
 # can also load an individual page in debug mode by appending URL with
 # ?debug=1
-settings.base.debug = False
+settings.base.debug = True
 
 # Uncomment to use Content Delivery Networks to speed up Internet-facing sites
 #settings.base.cdn = True
@@ -75,8 +82,7 @@ settings.base.debug = False
 #settings.base.guided_tour = True
 
 # This setting will be automatically changed _before_ registering the 1st user
-settings.auth.hmac_key = "akeytochange"
-
+deployment_settings.auth.hmac_key = "8f5bc67e-0754-4684-8f70-3640c86ec790"
 # This setting is for Minimum Password Length
 #settings.auth.password_min_length = 8
 
@@ -89,7 +95,7 @@ settings.mail.tls = True
 #settings.mail.tls = True
 #settings.mail.login = "username:password"
 # From Address - until this is set, no mails can be sent
-#settings.mail.sender = "'Sahana' <sahana@example.org>"
+settings.mail.sender = "'Sahana' <sahana@scdmc.lk>"
 # Default email address to which requests to approve new user accounts gets sent
 # This can be overridden for specific domains/organisations via the auth_domain table
 #settings.mail.approver = "useradmin@example.org"
@@ -167,8 +173,7 @@ settings.frontpage.rss = [
 #settings.ui.update_label = "Edit"
 
 # Audit settings
-# We Audit if either the Global or Module asks us to
-# (ignore gracefully if module author hasn't implemented this)
+# - can be a callable for custom hooks (return True to also perform normal logging, or False otherwise)
 # NB Auditing (especially Reads) slows system down & consumes diskspace
 #settings.security.audit_write = False
 #settings.security.audit_read = False
@@ -196,18 +201,6 @@ if os.path.exists(path):
 #        restricted = False,
 #        module_type = 10,
 #    )
-
-
-settings.modules["cap"] = Storage(
-        name_nice = T("CAP Broker"),
-        restricted = False,
-        module_type = 10,
-    )
-
-
-
-
-
 
 # After 1st_run, set this for Production to save 1x DAL hit/request
 #settings.base.prepopulate = 0

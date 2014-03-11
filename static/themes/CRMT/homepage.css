@@ -58,7 +58,6 @@ p {
     float: left;
     margin: 0 15px 15px 0;
 }
-
 .public_alearts { 
      margin: 10px 0;
     border: 1px solid #B2B2B2;
@@ -91,9 +90,9 @@ p {
     margin: 10px 0;
 }
 
+
 .updates {
     padding: 5px 0;
-    background-color: white;
 }
 .updates .dl-item {
     float: none;
