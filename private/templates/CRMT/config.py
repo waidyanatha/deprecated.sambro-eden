@@ -100,7 +100,7 @@ settings.security.audit_write = audit_write
 # Pre-Populate
 settings.base.prepopulate = ["CRMT"]
 
-settings.base.system_name = T("Community Resilience Mapping Tool")
+settings.base.system_name = T("SAHANA ALERTING AND MESSAGING BROKER")
 settings.base.system_name_short = T("CRMT")
 
 # -----------------------------------------------------------------------------
@@ -191,6 +191,11 @@ current.response.menu = [
      "f":"organisation",
      "icon": "icon-sitemap"
      },
+#    {"name":T("CAP"),
+#      "c":"cap",
+#      "f":"index",
+#      "icon":"icon-group"
+#      },
    # {"name": T("Places"),
    #  "c":"org", 
    #  "f":"facility",
@@ -234,10 +239,10 @@ for item in current.response.menu:
     item["url"] = URL(item["c"], item["f"])
 # -----------------------------------------------------------------------------
 # Summary Pages
-settings.ui.summary = [#{"common": True,
-                       # "name": "cms",
-                       # "widgets": [{"method": "cms"}]
-                       # },
+settings.ui.summary = [{"common": True,
+                        "name": "cms",
+                        "widgets": [{"method": "cms"}]
+                        },
                        {"name": "table",
                         "label": "Table",
                        "widgets": [{"method": "datatable"}]
@@ -2165,66 +2170,54 @@ settings.modules = OrderedDict([
         restricted = True,
         module_type = None,
     )),
-    ("doc", Storage(
-        name_nice = T("Documents"),
-       #description = "A library of digital resources, such as photos, documents and reports",
-        restricted = True,
-        module_type = None,
-    )),
+#    ("doc", Storage(
+#        name_nice = T("Documents"),
+#       #description = "A library of digital resources, such as photos, documents and reports",
+#        restricted = True,
+#        module_type = None,
+#    )),
     ("msg", Storage(
         name_nice = T("Messaging"),
         #description = "Sends & Receives Alerts via Email & SMS",
         restricted = True,
         # The user-visible functionality of this module isn't normally required. Rather it's main purpose is to be accessed from other modules.
-        module_type = None,
+        module_type = 3,
     )),
-    ("event", Storage(
-        name_nice = T("Events"),
-        #description = "Events",
-        restricted = True,
-        module_type = None
-    )),
+    #("event", Storage(
+    #    name_nice = T("Events"),
+    #    #description = "Events",
+    #    restricted = True,
+    #    module_type = None
+    #)),
     ("irs",Storage(
        name_nice = T("Incidents"),
         #description = "Incident Reporting System",
         restricted = True,
-        module_type = 10
+        module_type = 4
     )),
  
 
     ("cap", Storage(
         name_nice = T("CAP"),
         description = "Create & broadcast CAP alerts",
-        restricted = True,
-        module_type = 10,
+        restricted = False,
+        module_type = 5,
     )),
 
 
-    #("project", Storage(
-    #    name_nice = T("Projects"),
-    #    restricted = True,
-    #    module_type = None
-    #)),
-    #("stats", Storage(
-    #   name_nice = T("Statistics"),
-    #    restricted = True,
-    #    module_type = None
-    #)),
-    ("vulnerability", Storage(
-        name_nice = T("Vulnerability"),
+#    ("project", Storage(
+#        name_nice = T("Projects"),
+#        restricted = True,
+#        module_type = None
+#    )),
+    ("stats", Storage(
+       name_nice = T("Statistics"),
         restricted = True,
         module_type = None
     )),
+#    ("vulnerability", Storage(
+#        name_nice = T("Vulnerability"),
+#        restricted = True,
+#        module_type = None
+#    )),
 ])
-
-# add additionally 
-
-def public_alert():
-    table = db.cap_alert
-    query = (table.id == 1)
-    record = db(query).select().first()
-    if record:
-        #return record.name
-        return "hiii"
-    else:
-        return "-"

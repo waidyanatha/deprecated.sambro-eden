@@ -7,8 +7,6 @@
 module = request.controller
 resourcename = request.function
 
-global_data = []
-
 if not settings.has_module(module):
     raise HTTP(404, body="Module disabled: %s" % module)
 
@@ -275,72 +273,6 @@ def template():
     return output
 
 # -----------------------------------------------------------------------------
-
-def public_alert():
-    """ REST controller for CAP templates """
-
-    viewing = request.vars["viewing"]
-    if viewing:
-        table, id = viewing.strip().split(".")
-        if table == "cap_alert":
-            redirect(URL(c="cap", f="template", args=[id]))
-            return False
-
-    def prep(r):
-        atable = db.cap_alert
-        global_data = atable
-        for f in ["identifier", "msg_type"]:
-            field = atable[f]
-            field.writable = False
-            field.readable = False
-            field.requires = None
-        for f in ["status", "scope"]:
-            atable[f].requires = None
-        atable.template_title.required = True
-
-        ADD_ALERT_TPL = T("Create Template")
-        s3.crud_strings["cap_template"] = Storage(
-            title_create = ADD_ALERT_TPL,
-            title_display = T("Template"),
-            title_list = T("Templates"),
-            title_update = T("Edit Template"), # If already-published, this should create a new "Update" alert instead of modifying the original
-            title_upload = T("Import Templates"),
-            title_search = T("Search Templates"),
-            subtitle_create = T("Create new Template"),
-            label_list_button = T("List Templates"),
-            label_create_button = ADD_ALERT_TPL,
-            label_delete_button = T("Delete Template"),
-            msg_record_created = T("Template created"),
-            msg_record_modified = T("Template modified"),
-            msg_record_deleted = T("Template deleted"),
-            msg_list_empty = T("No templates to show"))
-
-        if r.representation == "html":
-            alert_fields_comments()
-            s3.scripts.append("/%s/static/scripts/json2.min.js" % appname)
-            s3.scripts.append("/%s/static/scripts/S3/s3.cap.js" % appname)
-            s3.stylesheets.append("S3/cap.css")
-
-        return True
-    s3.prep = prep
-
-    def postp(r,output):
-        if r.interactive and "form" in output:
-            s3.js_global.append('''i18n.cap_locked="%s"''' % T("Locked"))
-            tablename = r.tablename
-            if tablename == "cap_alert":
-                output["form"].add_class("cap_template_form")
-            elif tablename == "cap_info":
-                output["form"].add_class("cap_info_template_form")
-        return output
-    s3.postp = postp
-
-    output = s3_rest_controller("cap", "alert",
-                                rheader=s3db.cap_template_rheader)
-    return output
-
-# -----------------------------------------------------------------------------
-
 def add_submit_button(form, name, value):
     """
         Append a submit button to a form
@@ -654,99 +586,5 @@ def set_priority_js():
         js_global.append(priority_conf)
 
     return
-# -------------------------------------------------------------------------------
 
-def public_alrt():
-    """ REST controller for CAP templates """
-
-    viewing = request.vars["viewing"]
-    if viewing:
-        table, id = viewing.strip().split(".")
-        if table == "cap_alert":
-            redirect(URL(c="cap", f="template", args=[id]))
-            return False
-
-    def prep(r):
-        atable = db.cap_alert
-        global_data = atable
-        for f in ["identifier", "msg_type"]:
-            field = atable[f]
-            field.writable = False
-            field.readable = False
-            field.requires = None
-        for f in ["status", "scope"]:
-            atable[f].requires = None
-        atable.template_title.required = True
-
-        ADD_ALERT_TPL = T("Create Template")
-        s3.crud_strings["cap_template"] = Storage(
-            title_create = ADD_ALERT_TPL,
-            title_display = T("Template"),
-            title_list = T("Templates"),
-            title_update = T("Edit Template"), # If already-published, this should create a new "Update" alert instead of modifying the original
-            title_upload = T("Import Templates"),
-            title_search = T("Search Templates"),
-            subtitle_create = T("Create new Template"),
-            label_list_button = T("List Templates"),
-            label_create_button = ADD_ALERT_TPL,
-            label_delete_button = T("Delete Template"),
-            msg_record_created = T("Template created"),
-            msg_record_modified = T("Template modified"),
-            msg_record_deleted = T("Template deleted"),
-            msg_list_empty = T("No templates to show"))
-
-        if r.representation == "html":
-            alert_fields_comments()
-            s3.scripts.append("/%s/static/scripts/json2.min.js" % appname)
-            s3.scripts.append("/%s/static/scripts/S3/s3.cap.js" % appname)
-            s3.stylesheets.append("S3/cap.css")
-
-        return True
-    s3.prep = prep
-
-    def postp(r,output):
-        if r.interactive and "form" in output:
-            s3.js_global.append('''i18n.cap_locked="%s"''' % T("Locked"))
-            tablename = r.tablename
-            if tablename == "cap_alert":
-                output["form"].add_class("cap_template_form")
-            elif tablename == "cap_info":
-                output["form"].add_class("cap_info_template_form")
-        return output
-    s3.postp = postp
-
-    output = s3_rest_controller("cap", "alert",
-                                rheader=s3db.cap_public_alrt)
-    return output
-
-# -----------------------------------------------------------------------------
-def public_alt():
-    """ REST controller for CAP templates """  
-    """  
-    #output = s3db.cap_public_alrt
-    table = s3db.cap_alert
-    
-      
-    form = SQLFORM(table).process()
-
-    return dict(form=form)
-"""
-    table = s3db.cap_alert
-    rows = db().select(table.identifier
-                      ).first()
-
-    #rows = db().select(s3db.cap_info.ALL)
-    rows = db().select(db.cap_alert.id)
-    #records = record.pop()
-    for row in rows:
-      row_clone = row.as_dict()
-
-
-    
-    return dict(records=row_clone)
-
-    #return HTML(BODY(H1(output,_style="color: red;"))).xml()
-
-# -----------------------------------------------------------------------------
 # END =========================================================================
-# see line 344 ....

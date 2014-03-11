@@ -82,8 +82,7 @@
         <li class='divider'></li>
         {{if auth.is_logged_in():}}
 
-        <li><a href='/{{=appname}}/cap/alert/create'><i class='icon-new'></i> {{=T("New Alert")}}</a></li>
-        <!--<a href='/{{=appname}}/cap/template?alert.is_template=true'>-->
+        <li><a href='/{{=appname}}/cap/template?alert.is_template=true'><i class='icon-new'></i> {{=T("New Alert")}}</a></li>
         {{pass}}
        </ul>
       </li>
@@ -92,14 +91,14 @@
      
       <li class='dropdown'><a class='map' href='#'><i class='icon-profile'></i> {{=T("MANAGE CAP PROFILE")}}</a>
        <ul class='dropdown-menu'>
-        <li><a href='/{{=appname}}/org/organisation/report2'><i class='icon-sitemap'></i> {{=T("Authorities")}}</a></li>
-        <li><a href='/{{=appname}}/gis/index'><i class='icon-map'></i> {{=T("Locations")}}</a></li>
-        <li><a href='/{{=appname}}/vulnerability/risk/summary'><i class='icon-bolt'></i> {{=T("Hazards")}}</a></li>
-        <li><a href='/{{=appname}}/irs/ireport'><i class='icon-th '></i> {{=T("Incidents")}}</a></li>
+        <li><a href='/{{=appname}}/org/organisation/report2'><i class='icon-home'></i> {{=T("Authorities")}}</a></li>
+        <li><a href='/{{=appname}}/gis/index'><i class='icon-th '></i> {{=T("Locations")}}</a></li>
+        <li><a href='/{{=appname}}/org/organisation/report2'><i class='icon-th '></i> {{=T("Hazards")}}</a></li>
+        <li><a href='/{{=appname}}/org/organisation/report2'><i class='icon-th '></i> {{=T("Incidents")}}</a></li>
  {{if auth.is_logged_in():}}
-         <li><a href='/{{=appname}}/cap/template/create'><i class='icon-th '></i> {{=T("Message Templates")}}</a></li>
+         <li><a href='/{{=appname}}/org/organisation/report2'><i class='icon-th '></i> {{=T("Message Templates")}}</a></li>
  {{if auth.is_logged_in():}} 
-<li><a href='#'><i class='icon-th '></i> {{=T("Issuers")}}</a></li>
+<li><a href='/{{=appname}}/org/organisation/report2'><i class='icon-th '></i> {{=T("Issuers")}}</a></li>
       
 
   {{pass}}
@@ -115,8 +114,11 @@
       <li class='dropdown'><a href='#' class='dropdown-toggle disabled' data-toggle='dropdown'><i class='icon-cog'></i><b class='caret'></b></a>
        <ul class='dropdown-menu'>
         <!--<li><a href='/{{=appname}}/pr/person'><i class='icon-user'></i> {{=T("Contact People")}}</a></li>-->
+        <li><a href='/{{=appname}}/org/organisation/report2'><i class='icon-th '></i> {{=T("Organization Report")}}</a></li>
+        <li class='divider'></li>
         {{if auth.is_logged_in():}}
        <!-- <li><a href='/{{=appname}}/default/person'><i class='icon-cog'></i> {{=T("Preferences")}}</a></li>-->
+        <li><a href='/{{=appname}}/default/index/filters'><i class='icon-filter'></i> {{=T("Saved Filters")}}</a></li>
         <li><a href='/{{=appname}}/default/user/change_password'><i class='icon-lock'></i> {{=T("Change Password")}}</a></li>
         <li><a href='/{{=appname}}/default/user/logout'><i class='icon-off'></i> {{=T("Logout")}}</a></li>
         {{else:}}
@@ -131,13 +133,13 @@
  </div>
 </div>
 <div class='container'>
-<div id='alert-space'>
+<!-- <div id='alert-space'>
   {{if response.error:}}<div class='alert alert-error'><button type='button' class='close' data-dismiss='alert'>×</button>{{=response.error}}</div>{{pass}}
   {{if response.warning:}}<div class='alert'><button type='button' class='close' data-dismiss='alert'>×</button>{{=response.warning}}</div>{{pass}}
   {{if response.information:}}<div class='alert alert-info'><button type='button' class='close' data-dismiss='alert'>×</button>{{=response.information}}</div>{{pass}}
   {{if response.confirmation:}}<div class='alert alert-success'><button type='button' class='close' data-dismiss='alert'>×</button>{{=response.confirmation}}</div>{{pass}}
   {{if response.flash:}}<div class='alert alert-success'><button type='button' class='close' data-dismiss='alert'>×</button>{{=response.flash}}</div>{{pass}}
-</div>
+</div>-->
 {{include}}
 </div>
  <div id='footer'>

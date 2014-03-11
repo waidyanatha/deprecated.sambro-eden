@@ -64,3 +64,26 @@
 .rightside {
     margin-left:200px;
 }
+
+#cap_container{
+    overflow: hidden;
+}
+#public_alerts{
+    float: left;
+    border:solid 3px #000;
+    width: 20%;
+    height: 400px;
+}
+#subscribe_cap{
+    float: right;
+    border:solid 3px #000;
+    width: 20%;
+    height: 400px;    
+}
+#cap_map{
+    float: left;
+    border:solid 3px #f00;
+    width: 58%;
+    height: 400px;
+    left:21%;
+}

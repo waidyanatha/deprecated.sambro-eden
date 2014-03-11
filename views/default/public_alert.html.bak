@@ -2,7 +2,7 @@
 		<hr>
 		<a href="/{{=appname}}/cap/alert/search" target="_top"> {{=itm[1]}} </a>
 		<p style="margin-top:1px;">
-            Incidents: {{=itm[0]}}
+            {{=itm[0]}}
                      
 		</p>
 {{pass}}
